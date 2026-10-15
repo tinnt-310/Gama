@@ -1,0 +1,75 @@
+digraph "07_choice_arrival" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="07 · EVChoice, hành trình và actual arrival" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	start [label="execute_ev_choice(EV)" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	valid [label="Có options và state requested/deferred?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	wait [label="Chưa áp destination
+Giữ pending cho epoch tiếp theo" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	mode [label="ev_choice_mode?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	follow [label="FOLLOW: lấy recommended option" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	self [label="SELF_INTERESTED: rank lại options
+Theo personal_choice_method / personal_weights" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	trace [label="TRACE: yêu cầu trace cho request
+Lấy record mới nhất có time ≤ epoch" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	tracestatus [label="Trace record hợp lệ và chọn station
+trong options hiện có?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	traceerror [label="Trace thiếu: CHOICE_TRACE_MISSING
+Assertion; không tạo trace giả" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	intention [label="Nếu publish_intention: gửi intention audit
+Không giữ cổng / thêm queue / cộng vào forecast" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	apply [label="apply_station_choice: đặt current/chosen_station
+Choice time, ETA, predicted energy / wait
+Reset distance; state=en_route; ghi choice / en_route" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	path [label="Native compute_path tới station access node
+Không giữ candidate path object bất biến" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	drive [label="Drive theo road graph và congestion thực tế
+D = max(0, remaining_before − remaining_after)
+SOC -= 100 × c × D_m / (1000 × B)" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	terminal [label="Hủy / agent bị xóa / hết pin?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	cleanup [label="Terminal event một lần; cleanup
+Queue, cổng, intention, pending metadata
+Stranded: unregister và die" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	reached [label="Đã tới access node đúng trạm
+và final_target=nil?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	due [label="Nếu vừa đi tới: station_arrival_due=(time+step)/60
+Materialize arrival khi clock đạt boundary" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	enqueue [label="enqueue_arrival kiểm live EV, đúng current_station
+State hợp lệ, distance < 2m, chưa arrival lần trước" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	demand [label="Xóa intention / inbound nếu có; clear waiting cache
+Target SOC: tính lại E_req từ SOC thực tế tại arrival" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	observe [label="Ghi arrival time và local observation
+State=waiting; arrived_customer += 1
+Thêm cuối FIFO; ghi arrival event" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	fifo [label="process_queue; cập nhật peak_queue
+Sơ đồ 08" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	noroute [label="EV en_route không tự được re-recommend
+Queue tăng giữa hành trình không tự đổi destination" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	start -> valid [label="" style=solid]
+	valid -> wait [label="Không" style=solid]
+	valid -> mode [label="Có" style=solid]
+	mode -> wait [label=DEFER style=solid]
+	mode -> follow [label=FOLLOW style=solid]
+	mode -> self [label=SELF style=solid]
+	mode -> trace [label=TRACE style=solid]
+	trace -> tracestatus [label="" style=solid]
+	tracestatus -> traceerror [label="Thiếu trace" style=solid]
+	tracestatus -> wait [label="Chưa tới giờ / trạm rỗng / ngoài options" style=solid]
+	tracestatus -> intention [label="Có" style=solid]
+	follow -> intention [label="" style=solid]
+	self -> intention [label="" style=solid]
+	intention -> apply [label="" style=solid]
+	apply -> path [label="" style=solid]
+	path -> enqueue [label="Đã ở đúng access node" style=solid]
+	path -> drive [label="Cần di chuyển" style=solid]
+	drive -> terminal [label="" style=solid]
+	terminal -> cleanup [label="Có" style=solid]
+	terminal -> reached [label="Không" style=solid]
+	reached -> drive [label="Chưa đến" style=solid]
+	reached -> due [label="Tới cuối path" style=solid]
+	due -> enqueue [label="Clock đạt arrival_due" style=solid]
+	drive -> noroute [label="Behavior hiện tại" style=dashed]
+	enqueue -> demand [label="" style=solid]
+	demand -> observe [label="" style=solid]
+	observe -> fifo [label="" style=solid]
+}

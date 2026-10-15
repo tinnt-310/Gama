@@ -1,0 +1,51 @@
+flowchart TD
+    n_start(["Options hợp lệ: f_m = [T, D, E_travel, W_pred]<br/>Mọi tiêu chí đều tối thiểu hóa"])
+    n_check["Kiểm tra criteria không âm, normalization / method<br/>Weighted / monetary: 4 weights ≥ 0, tổng > 0"]
+    n_pareto["So sánh từng option với tất cả competitors<br/>Dominated khi competitor không tệ hơn mọi tiêu chí<br/>và tốt hơn ít nhất một; có numeric tolerance"]
+    n_flags["Đánh dấu pareto=true/false<br/>Giữ cả options dominated để audit"]
+    n_norm{"normalization_mode?"}
+    n_feasible["feasible (mặc định): min/max<br/>trên mọi options có thông tin hợp lệ"]
+    n_front["pareto (ablation): min/max<br/>chỉ trên Pareto set"]
+    n_regret["l_j = min f_j; u_j = max f_j<br/>Range ≤ epsilon: r_mj = 0<br/>Ngược lại: r_mj = (f_mj − l_j) / (u_j − l_j)"]
+    n_method{"recommendation_method?"}
+    n_minimax["minimax: R_m = max_j r_mj<br/>Eligible = Pareto set"]
+    n_nearest["nearest: score = D_km<br/>eta: score = T_phút<br/>Eligible = mọi valid options"]
+    n_other["time_wait: score = T + W<br/>weighted_sum: score = sum alpha_j × r_mj<br/>monetary: score = sum alpha_j × f_mj<br/>Eligible = Pareto set"]
+    n_best["Chọn score nhỏ nhất<br/>Tolerance score = 1e−10"]
+    n_tie["Nếu hòa: minimax / weighted / time_wait / monetary<br/>chọn T+W nhỏ nhất, rồi station.index nhỏ nhất<br/>Nearest / eta: hòa thì station.index nhỏ nhất"]
+    n_result["Đánh dấu winner, alternative ranks<br/>Lưu Pareto flags, regrets, score_method"]
+    n_record(["Tăng recommendation_version<br/>Lưu recommendation và candidate rows<br/>Chưa đổi destination / queue / inbound"])
+    n_note["Min/max thay đổi theo candidate set<br/>Không phải weights được train<br/>Minimax từng EV không tối ưu tổng waiting thành phố"]
+    n_start --> n_check
+    n_check --> n_pareto
+    n_pareto --> n_flags
+    n_flags --> n_norm
+    n_norm -->|"feasible"| n_feasible
+    n_norm -->|"pareto"| n_front
+    n_feasible --> n_regret
+    n_front --> n_regret
+    n_regret --> n_method
+    n_method -->|"Chính"| n_minimax
+    n_method -->|"B1 / B2"| n_nearest
+    n_method -->|"Đối chứng khác"| n_other
+    n_minimax --> n_best
+    n_nearest --> n_best
+    n_other --> n_best
+    n_regret -.->|"Ý nghĩa"| n_note
+    n_best --> n_tie
+    n_tie --> n_result
+    n_result --> n_record
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_check,n_pareto,n_feasible,n_front,n_regret,n_minimax,n_nearest,n_other,n_best,n_tie process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_norm,n_method decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_flags,n_result data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_record end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_start start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_note note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

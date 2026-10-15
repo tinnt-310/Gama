@@ -1,0 +1,65 @@
+digraph "08_physical" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="08 · Physical FIFO, cấp cổng và tích phân năng lượng" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	arrival [label="Arrival hợp lệ → gọi process_queue" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	tick [label="service_tick → advance_service" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	reconcile [label="Clear waiting cache; reconcile_sessions
+Dọn dead sessions, terminal events và cổng" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	pending [label="Phiên completion_pending
+và clock ≥ service_finish?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	finish [label="stop_charging: completed event một lần
+Giải phóng cổng; served_customer += 1
+needs_charging=false; current_station=nil" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	queue [label="process_queue: reconcile và lọc FIFO hợp lệ" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	free [label="Queue còn xe và có cổng rảnh?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	dispatch [label="Lấy EV đầu FIFO
+Chọn cổng rảnh mạnh nhất: 250,180,150,60,30,11
+Occupy port; state=charging; service_start=clock" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	waitmetric [label="W_actual = service_start − arrival_time
+Tăng started; ghi service_started event" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	waiters [label="EV còn waiting: cập nhật elapsed waiting
+Chưa start thì waiting cuối cùng chưa biết" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	integrate [label="Với mỗi EV charging chưa completion_pending:
+E_remaining = min(E_req − E_delivered, battery headroom)
+Delta_E = min(max(0,E_remaining), eta × P × step/3600)" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	soc [label="E_delivered += Delta_E
+SOC += 100 × Delta_E / B; cap 100%
+Grid_kWh += Delta_E / eta
+Charging_min += 60 × Delta_E / (eta × P)" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	complete [label="Đủ requested energy
+hoặc SOC đạt 100%?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	mark [label="service_finish = clock + charge_seconds/60
+completion_pending=true
+Chưa release port trong integration interval này" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	next [label="Lưu physical session snapshot
+Chờ service tick tiếp theo" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	rates [label="B=60 kWh, eta=0.9: SOC tăng mỗi phút
+11 kW: 0.275 điểm %; 30: 0.75; 60: 1.5
+150: 3.75; 180: 4.5; 250: 6.25
+Cuối phiên cap theo demand; chưa có taper" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	{
+		rank=same
+		arrival
+		tick
+	}
+	tick -> reconcile [label="" style=solid]
+	reconcile -> pending [label="" style=solid]
+	pending -> finish [label="Có" style=solid]
+	finish -> queue [label="" style=solid]
+	pending -> queue [label="Không" style=solid]
+	arrival -> queue [label="" style=solid]
+	queue -> free [label="" style=solid]
+	free -> dispatch [label="Có" style=solid]
+	dispatch -> waitmetric [label="" style=solid]
+	waitmetric -> free [label="EV tiếp" style=solid]
+	free -> waiters [label="Không; khi trong service tick" style=solid]
+	waiters -> integrate [label="" style=solid]
+	integrate -> soc [label="" style=solid]
+	soc -> complete [label="" style=solid]
+	complete -> mark [label="Có" style=solid]
+	mark -> next [label="" style=solid]
+	complete -> next [label="Không" style=solid]
+	next -> tick [label="Tick sau" style=solid]
+	soc -> rates [label="Ví dụ default" style=dashed]
+}

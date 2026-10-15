@@ -1,0 +1,83 @@
+digraph "01_overview" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="01 · Toàn bộ vòng đời hệ thống" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	boot [label="Bắt đầu experiment" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	init [label="Nạp cấu hình, seed, step và giờ bắt đầu
+Nạp GIS; tạo graph, access nodes, 11 trạm và xe" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	out [label="Tạo thư mục output riêng
+Ghi config / input manifest nếu có" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	tick [label="Thời gian mô phỏng tiến theo step
+Cập nhật lịch xe, rush, giao thông và SOC" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	need [label="EV idle/completed, SOC < 30%
+và chưa có nhu cầu / chưa sạc?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	req [label="begin_request: tạo request_id
+State=requested; tắt home charging; reset session" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	due [label="Tới coordination epoch
+và coordination_enabled?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	mode [label="runtime_mode?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	rec [label="RECOMMENDATION_RUNTIME
+Forecast → candidate → query → ranking
+Sơ đồ 02–06" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	choice [label="EVChoice chọn hành động / trạm
+Sơ đồ 07" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	picked [label="Đã chọn trạm hợp lệ?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	pending [label="Giữ requested/deferred
+Thử lại ở epoch tiếp theo" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	ideal [label="IDEAL_COORDINATED_ASSIGNMENT
+Snapshot → PDHG → GKPS → repair → hard commit
+Sơ đồ 10" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	travel [label="Di chuyển thực tế tới access node trạm
+Trừ SOC theo quãng đường thực tế" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	alive [label="Xe tới trạm hợp lệ
+và chưa terminal?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	arrival [label="Actual arrival: xác nhận đúng trạm, đúng thời điểm
+Tính lại energy demand; ghi observation local" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	fifo [label="Enqueue FIFO → cấp cổng → tích phân sạc
+Chỉ arrival mới thêm physical workload
+Sơ đồ 08" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	done [label="Session completed
+Giải phóng cổng; EV tiếp tục lịch hoạt động" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	failure [label="Cancelled / stranded / agent bị xóa
+Ghi terminal một lần; cleanup ledger, queue, cổng" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	logs [label="Xuất events, recommendation, forecast, communication
+Snapshot station/status; population; thống kê cumulative" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	feedback [label="Actual arrivals → history tại từng trạm
+Closed bins / nhãn trưởng thành → forecast tương lai" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	limits [label="Recommendation không phải reservation
+Không re-recommend xe en_route
+Không optimizer choices toàn thành phố" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	offline [label="Đánh giá offline: actual T, W, T+W, energy
+Completed/unfinished; prediction error; herding" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	boot -> init [label="" style=solid]
+	init -> out [label="" style=solid]
+	out -> tick [label="" style=solid]
+	tick -> need [label="" style=solid]
+	need -> req [label="Có" style=solid]
+	need -> due [label="Không" style=solid]
+	req -> due [label="" style=solid]
+	due -> tick [label="Chưa" style=solid]
+	due -> mode [label="Có" style=solid]
+	mode -> rec [label=Recommendation style=solid]
+	mode -> ideal [label="Ideal benchmark" style=solid]
+	rec -> choice [label="" style=solid]
+	choice -> picked [label="" style=solid]
+	picked -> pending [label="Chưa" style=solid]
+	pending -> tick [label="" style=solid]
+	picked -> travel [label="Có" style=solid]
+	ideal -> travel [label="Sau hard commit" style=solid]
+	travel -> alive [label="" style=solid]
+	alive -> travel [label="Chưa đến; còn hợp lệ" style=solid]
+	alive -> failure [label="Hủy / hết pin / bị xóa" style=solid]
+	alive -> arrival [label="Đúng arrival" style=solid]
+	arrival -> fifo [label="" style=solid]
+	fifo -> done [label="Hoàn tất" style=solid]
+	fifo -> failure [label="Hủy / bị xóa" style=solid]
+	arrival -> feedback [label="Dữ liệu quan sát" style=solid]
+	feedback -> rec [label="Epoch tương lai" style=solid]
+	done -> tick [label="Nhu cầu mới có thể phát sinh" style=solid]
+	rec -> limits [label="Chú thích" style=dashed]
+	done -> logs [label="" style=solid]
+	failure -> logs [label="" style=solid]
+	logs -> offline [label="" style=solid]
+}

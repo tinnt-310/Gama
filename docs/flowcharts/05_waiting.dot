@@ -1,0 +1,86 @@
+digraph "05_waiting" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="05 · Waiting prediction: B3, B4, B4-N và fallback" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	start [label="predict_waiting(issued, ETA_offset ≥ 0)" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	cached [label="Waiting cache có đúng key?
+Issued, ETA_offset, forecast, estimator, fallback" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	returncache [label="Trả cached result; tăng cache_hits" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	shadow [label="shadow_port_state: rates và free_at
+Cổng rảnh + phiên đang sạc + physical FIFO
+Không cộng inbound / intention / recommendations" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	b3 [label="Discrete shadow không thêm future arrivals
+W_physical = max(0, min free_at − ETA_offset)
+Không có cổng: −1" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	mode [label="waiting_forecast_mode = B3?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	physical [label="Result: W_physical; status=physical_only" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	horizon [label="B4 / B4-N: H = max(1, ceil(ETA_offset / 5))
+replay_windows(issued, H)" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	history [label="Đủ closed bins, observed arrivals
+và history cho H?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	cold [label="Giữ W_physical
+status=cold_start / insufficient_horizon" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	forecast [label="B4: local moving average
+B4-N: workload forecast đã issue, nếu còn coverage
+Horizon thiếu coverage dùng local value" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	scan [label="Duyệt history windows đã hoàn tất trước query
+Tính normalized RMS mismatch với forecast
+Scale = max(1, local_value)" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	calibrated [label="Replay similarity threshold ≥ 0?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	unconfigured [label="Giữ W_physical
+status=ood_threshold_not_calibrated" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	accepted [label="Có window mismatch ≤ threshold?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	ood [label="Giữ W_physical
+status=out_of_distribution" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	scenarios [label="Chọn tối đa replay_scenarios windows tốt nhất
+Giữ arrival offsets và energy từng session
+Không scale energy / sinh thêm xe" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	replay [label="Mỗi scenario: chạy discrete shadow trên bản copy
+Arrivals ≤ ETA được xử lý trước probe
+FIFO; tick rounding; earliest port, hòa chọn power cao" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	mean [label="W_pred = mean(W_s); status=replay
+scenario_count; spread = max(W_s) − min(W_s)" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	fluidgate [label="Mode khác B3 và:
+estimator=fluid HOẶC
+(status=OOD và fallback=fluid)?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	fluid [label="fluid_waiting từ LOCAL baseline
+Residual capacity và causal backlog
+Không dùng corrected workload của B4-N" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	fluidvalid [label="Fluid đủ horizon: W_fluid ≥ 0?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	fluidok [label="W = max(W_physical, W_fluid)
+status=fluid_approximation / ood_fluid_fallback" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	fluidfail [label="W = −1; status=fluid_horizon_exhausted
+Option sẽ unavailable" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	save [label="Lưu cache / last_wait_result; cập nhật counters
+Trả W, status, issued_at, replay error / count / spread" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	start -> cached [label="" style=solid]
+	cached -> returncache [label="Có" style=solid]
+	cached -> shadow [label="Không" style=solid]
+	shadow -> b3 [label="" style=solid]
+	b3 -> mode [label="" style=solid]
+	mode -> physical [label="Có" style=solid]
+	physical -> save [label="" style=solid]
+	mode -> horizon [label="Không" style=solid]
+	horizon -> history [label="" style=solid]
+	history -> cold [label="Không" style=solid]
+	cold -> fluidgate [label="" style=solid]
+	history -> forecast [label="Có" style=solid]
+	forecast -> scan [label="" style=solid]
+	scan -> calibrated [label="" style=solid]
+	calibrated -> unconfigured [label="Không" style=solid]
+	unconfigured -> fluidgate [label="" style=solid]
+	calibrated -> accepted [label="Có" style=solid]
+	accepted -> ood [label="Không" style=solid]
+	ood -> fluidgate [label="" style=solid]
+	accepted -> scenarios [label="Có" style=solid]
+	scenarios -> replay [label="" style=solid]
+	replay -> mean [label="" style=solid]
+	mean -> fluidgate [label="" style=solid]
+	fluidgate -> save [label="Không" style=solid]
+	fluidgate -> fluid [label="Có" style=solid]
+	fluid -> fluidvalid [label="" style=solid]
+	fluidvalid -> fluidok [label="Có" style=solid]
+	fluidvalid -> fluidfail [label="Không" style=solid]
+	fluidok -> save [label="" style=solid]
+	fluidfail -> save [label="" style=solid]
+}

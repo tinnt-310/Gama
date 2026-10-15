@@ -1,0 +1,85 @@
+digraph "10_ideal" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="10 · Ideal coordinated assignment — benchmark riêng" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	start [label="coordinate_batch
+Assert runtime=IDEAL_COORDINATED_ASSIGNMENT" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	refresh [label="refresh_inbound: ETA từ remaining committed route
+Lấy requested/deferred EVs; build feasible candidates" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	batch [label="Batch có EV với candidate hợp lệ?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	empty [label="Không solve; chờ epoch sau" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	snapshot [label="Đóng băng snapshot edges, station capacity, inbound
+Horizon phủ max ETA + 120 phút tail
+Demand d_nm / reference units; cost T hoặc time_energy" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	objective [label="A_mh = inbound + sum d_nm × x_nm
+q_mh = A_mh + max(0,q_prev − C_mh)
+J_theta = sum c_nm x_nm + (Delta/d_ref)sum q
++ theta sum x_nm ln x_nm; row sum x=1" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	policy [label="assignment_policy?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	nearest [label="nearest hard-assignment baseline
+Đặt x theo road distance; evaluate / project; z=xp
+Bỏ qua proposed PDHG / rounding / repair" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	prepare [label="proposed: prepare_solver
+Epigraph Q, inequality duals, equality dual copies
+tau=sigma=0.99 / norm estimate" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	iter [label="Một iteration đồng bộ:
+Trao đổi xbar → update duals → entropy prox x
+Clamp Q → extrapolate bar=2new−old" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	check [label="Tới kỳ check (20 iterations)?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	evaluate [label="Project row simplex để lấy xp khả thi
+Recompute causal profile; objective / LB / gap
+Primal residual và consensus residual" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	converged [label="Residual ≤ 1e−6; consensus ≤ 1e−6
+relative gap ≤ 1e−7?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	yes [label="solver_status=converged" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	budget [label="Còn iteration budget?
+Default 20,000" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	timeout [label="solver_status=timeout
+Vẫn recovery từ projected xp; không gọi tối ưu" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	project [label="recover_integer: project_assignment
+Tạo components theo shared candidate graph
+Đại diện component = station index nhỏ nhất" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	round [label="GKPS dependent rounding, RNG riêng
+Even cycle / forest path, alternating +/-
+Mỗi bước giảm fractional edges; mỗi EV chọn một trạm" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	repair [label="Exact repair: xét one-EV relocation
+Top five trước, rồi mọi moves còn lại
+Exact delta < −1e−6 thì accept; lặp đến hết improving move" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	audit [label="Integer UB không tăng sau repair; LB ≤ UB
+Lưu status, bounds, residual, x/xp/z và RNG audit" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	commit [label="commit_assignment chỉ dùng final z=1
+Ghi inbound workload / ETA / EV metadata
+State assigned → en_route; đặt destination / path" color="#AA7143" fillcolor="#FFF0E5" shape=box]
+	physical [label="Actual arrival xóa inbound trước enqueue
+Dùng chung physical FIFO và charging
+Sơ đồ 07–08" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	limit [label="Certificate: frozen surrogate snapshot
+Repair: one-exchange local optimum, không global optimum
+Không dùng benchmark này chứng nhận recommendation" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	start -> refresh [label="" style=solid]
+	refresh -> batch [label="" style=solid]
+	batch -> empty [label="Không" style=solid]
+	batch -> snapshot [label="Có" style=solid]
+	snapshot -> objective [label="" style=solid]
+	objective -> policy [label="" style=solid]
+	policy -> nearest [label=nearest style=solid]
+	nearest -> audit [label="" style=solid]
+	policy -> prepare [label=proposed style=solid]
+	prepare -> iter [label="" style=solid]
+	iter -> check [label="" style=solid]
+	check -> evaluate [label="Có" style=solid]
+	check -> budget [label="Chưa" style=solid]
+	evaluate -> converged [label="" style=solid]
+	converged -> yes [label="Có" style=solid]
+	converged -> budget [label="Không" style=solid]
+	budget -> iter [label="Có" style=solid]
+	budget -> timeout [label="Không" style=solid]
+	yes -> project [label="" style=solid]
+	timeout -> project [label="" style=solid]
+	project -> round [label="" style=solid]
+	round -> repair [label="" style=solid]
+	repair -> audit [label="" style=solid]
+	audit -> commit [label="" style=solid]
+	commit -> physical [label="" style=solid]
+	audit -> limit [label="Phạm vi kết luận" style=dashed]
+}

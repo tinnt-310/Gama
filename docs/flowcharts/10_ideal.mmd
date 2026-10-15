@@ -1,0 +1,64 @@
+flowchart TD
+    n_start(["coordinate_batch<br/>Assert runtime=IDEAL_COORDINATED_ASSIGNMENT"])
+    n_refresh["refresh_inbound: ETA từ remaining committed route<br/>Lấy requested/deferred EVs; build feasible candidates"]
+    n_batch{"Batch có EV với candidate hợp lệ?"}
+    n_empty(["Không solve; chờ epoch sau"])
+    n_snapshot["Đóng băng snapshot edges, station capacity, inbound<br/>Horizon phủ max ETA + 120 phút tail<br/>Demand d_nm / reference units; cost T hoặc time_energy"]
+    n_objective["A_mh = inbound + sum d_nm × x_nm<br/>q_mh = A_mh + max(0,q_prev − C_mh)<br/>J_theta = sum c_nm x_nm + (Delta/d_ref)sum q<br/>+ theta sum x_nm ln x_nm; row sum x=1"]
+    n_policy{"assignment_policy?"}
+    n_nearest["nearest hard-assignment baseline<br/>Đặt x theo road distance; evaluate / project; z=xp<br/>Bỏ qua proposed PDHG / rounding / repair"]
+    n_prepare["proposed: prepare_solver<br/>Epigraph Q, inequality duals, equality dual copies<br/>tau=sigma=0.99 / norm estimate"]
+    n_iter["Một iteration đồng bộ:<br/>Trao đổi xbar → update duals → entropy prox x<br/>Clamp Q → extrapolate bar=2new−old"]
+    n_check{"Tới kỳ check (20 iterations)?"}
+    n_evaluate["Project row simplex để lấy xp khả thi<br/>Recompute causal profile; objective / LB / gap<br/>Primal residual và consensus residual"]
+    n_converged{"Residual ≤ 1e−6; consensus ≤ 1e−6<br/>relative gap ≤ 1e−7?"}
+    n_yes["solver_status=converged"]
+    n_budget{"Còn iteration budget?<br/>Default 20,000"}
+    n_timeout["solver_status=timeout<br/>Vẫn recovery từ projected xp; không gọi tối ưu"]
+    n_project["recover_integer: project_assignment<br/>Tạo components theo shared candidate graph<br/>Đại diện component = station index nhỏ nhất"]
+    n_round["GKPS dependent rounding, RNG riêng<br/>Even cycle / forest path, alternating +/-<br/>Mỗi bước giảm fractional edges; mỗi EV chọn một trạm"]
+    n_repair["Exact repair: xét one-EV relocation<br/>Top five trước, rồi mọi moves còn lại<br/>Exact delta < −1e−6 thì accept; lặp đến hết improving move"]
+    n_audit["Integer UB không tăng sau repair; LB ≤ UB<br/>Lưu status, bounds, residual, x/xp/z và RNG audit"]
+    n_commit["commit_assignment chỉ dùng final z=1<br/>Ghi inbound workload / ETA / EV metadata<br/>State assigned → en_route; đặt destination / path"]
+    n_physical(["Actual arrival xóa inbound trước enqueue<br/>Dùng chung physical FIFO và charging<br/>Sơ đồ 07–08"])
+    n_limit["Certificate: frozen surrogate snapshot<br/>Repair: one-exchange local optimum, không global optimum<br/>Không dùng benchmark này chứng nhận recommendation"]
+    n_start --> n_refresh
+    n_refresh --> n_batch
+    n_batch -->|"Không"| n_empty
+    n_batch -->|"Có"| n_snapshot
+    n_snapshot --> n_objective
+    n_objective --> n_policy
+    n_policy -->|"nearest"| n_nearest
+    n_nearest --> n_audit
+    n_policy -->|"proposed"| n_prepare
+    n_prepare --> n_iter
+    n_iter --> n_check
+    n_check -->|"Có"| n_evaluate
+    n_check -->|"Chưa"| n_budget
+    n_evaluate --> n_converged
+    n_converged -->|"Có"| n_yes
+    n_converged -->|"Không"| n_budget
+    n_budget -->|"Có"| n_iter
+    n_budget -->|"Không"| n_timeout
+    n_yes --> n_project
+    n_timeout --> n_project
+    n_project --> n_round
+    n_round --> n_repair
+    n_repair --> n_audit
+    n_audit --> n_commit
+    n_commit --> n_physical
+    n_audit -.->|"Phạm vi kết luận"| n_limit
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_batch,n_policy,n_check,n_converged,n_budget decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_audit data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_empty,n_physical end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_start start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_limit note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;
+    class n_refresh,n_snapshot,n_objective,n_nearest,n_prepare,n_iter,n_evaluate,n_yes,n_timeout,n_project,n_round,n_repair,n_commit ideal;

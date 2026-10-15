@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="900" viewBox="0 0 1920 900" role="img" aria-labelledby="title desc">
+<title id="title">Khuyến nghị xe đến trạm sạc dựa trên quan sát phân tán</title>
+<desc id="desc">Một flowchart nằm ngang: xe cần sạc, lọc trạm có thể đến, dự báo tại từng trạm, Pareto–Minimax, khuyến nghị, xe tự quyết định, di chuyển và đến trạm sạc. Trạng thái vật lý và lịch sử xe thực sự đến cung cấp dữ liệu cho dự báo. Hiệu chỉnh học từ trạm lân cận là tùy chọn. Xe có thể chưa chọn và chờ khuyến nghị sau. Khuyến nghị không giữ chỗ.</desc>
+<defs>
+<marker id="slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#76859B"/></marker>
+<marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#238270"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7654A6"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3067AF"/></marker>
+<symbol id="car" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linejoin="round"><path d="M7 27 L12 16 H32 L39 27 V36 H7 Z M9 27 H38 M23 17 V27"/><circle cx="14" cy="36" r="4" fill="white"/><circle cx="33" cy="36" r="4" fill="white"/></g></symbol>
+<symbol id="map" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linejoin="round"><path d="M5 13 L17 8 L31 14 L43 9 V35 L31 40 L17 34 L5 39 Z M17 8 V34 M31 14 V40 M19 23 L24 28 L34 18"/></g></symbol>
+<symbol id="clock" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round"><circle cx="24" cy="24" r="18"/><path d="M24 12 V24 L33 29"/></g></symbol>
+<symbol id="balance" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M24 8 V39 M13 40 H35 M9 12 H39 M11 13 L4 28 H18 Z M37 13 L30 28 H44 Z"/><circle cx="24" cy="10" r="3" fill="white"/></g></symbol>
+<symbol id="pin" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7"><path d="M24 43 C20 35 9 25 9 18 A15 15 0 0 1 39 18 C39 25 28 35 24 43 Z"/><circle cx="24" cy="18" r="5"/></g></symbol>
+<symbol id="person" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round"><circle cx="24" cy="14" r="7"/><path d="M11 40 V34 A13 13 0 0 1 37 34 V40"/></g></symbol>
+<symbol id="travel" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 24 L42 6 L27 42 L22 28 Z M22 28 L42 6"/></g></symbol>
+<symbol id="charger" viewBox="0 0 48 48"><g fill="none" stroke="currentColor" stroke-width="2.7" stroke-linejoin="round"><rect x="10" y="6" width="24" height="36" rx="3"/><path d="M34 13 H39 V33 A3 3 0 0 1 33 33 M24 17 L17 27 H26 L20 36 M15 12 H29"/></g></symbol>
+</defs><g font-family="DejaVu Sans, sans-serif">
+<rect x="0" y="0" width="1920" height="900" rx="0" fill="#FFFFFF" stroke="none" stroke-width="1.6"/>
+<text x="52" y="62" font-size="31" fill="#172B44" font-weight="700" text-anchor="start">KHUYẾN NGHỊ TRẠM SẠC PHÂN TÁN</text>
+<text x="52" y="99" font-size="19" fill="#5B6C83" font-weight="400" text-anchor="start">Quan sát tại trạm • Pareto–Minimax • Xe tự quyết định</text>
+<rect x="448" y="137" width="650" height="343" rx="20" fill="#F3FAF7" stroke="#9BC9B6" stroke-width="1.6" stroke-dasharray="8 6"/>
+<text x="470" y="166" font-size="15" fill="#238270" font-weight="700" text-anchor="start">MỖI TRẠM TỰ DỰ BÁO</text>
+<rect x="466" y="195" width="172" height="68" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6"/>
+<text x="552.0" y="224.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Cổng sạc</text>
+<text x="552.0" y="246.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Hàng đợi</text>
+<rect x="671" y="195" width="180" height="68" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6"/>
+<text x="761.0" y="224.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Lịch sử</text>
+<text x="761.0" y="246.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">xe thực sự đến</text>
+<rect x="895" y="195" width="180" height="68" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text x="985.0" y="224.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Dự báo</text>
+<text x="985.0" y="246.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">trạm lân cận</text>
+<rect x="671" y="298" width="180" height="60" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6"/>
+<text x="761.0" y="334.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Dự báo tải</text>
+<rect x="895" y="298" width="180" height="60" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text x="985.0" y="334.0" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Hiệu chỉnh học</text>
+<text x="987" y="184" font-size="11" fill="#697F75" font-weight="700" text-anchor="middle">TÙY CHỌN</text>
+<rect x="671" y="387" width="180" height="80" rx="12" fill="#FFFFFF" stroke="#90BFAF" stroke-width="1.6"/>
+<text x="761" y="417" font-size="16" fill="#238270" font-weight="600" text-anchor="middle">Replay lịch sử</text>
+<text x="761" y="440" font-size="12" fill="#557968" font-weight="400" text-anchor="middle">Kiểm tra độ đại diện</text>
+<path d="M761 263 V294" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)"/>
+<path d="M985 263 V294" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)" stroke-dasharray="7 6"/>
+<path d="M851 328 H891" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)" stroke-dasharray="7 6"/>
+<path d="M761 358 V383" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)"/>
+<path d="M985 358 V371 Q985 378 978 378 H819 Q813 378 813 384" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)" stroke-dasharray="7 6"/>
+<path d="M552 263 V501" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)"/>
+<path d="M761 467 V487 Q761 493 755 493 H655 Q648 493 648 501" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)"/>
+<text x="502" y="405" font-size="13" fill="#238270" font-weight="400" text-anchor="middle">Fallback</text>
+<text x="502" y="427" font-size="11" fill="#617D70" font-weight="400" text-anchor="middle">khi replay</text>
+<text x="502" y="445" font-size="11" fill="#617D70" font-weight="400" text-anchor="middle">không phù hợp</text>
+<path d="M671 427 H570 Q552 427 552 443" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)" stroke-dasharray="7 6"/>
+<rect x="52" y="505" width="160" height="148" rx="16" fill="#EFF5FE" stroke="#3067AF" stroke-width="1.6"/>
+<use href="#car" x="110.0" y="522" width="44" height="44" color="#3067AF"/>
+<text x="132.0" y="592" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">Xe yêu cầu</text>
+<text x="132.0" y="618" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">sạc</text>
+<rect x="247" y="505" width="190" height="148" rx="16" fill="#EFF5FE" stroke="#3067AF" stroke-width="1.6"/>
+<use href="#map" x="320.0" y="522" width="44" height="44" color="#3067AF"/>
+<text x="342.0" y="592" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">Lọc trạm</text>
+<text x="342.0" y="618" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">khả thi</text>
+<rect x="470" y="505" width="260" height="148" rx="16" fill="#E8F5EF" stroke="#238270" stroke-width="1.6"/>
+<use href="#clock" x="578.0" y="522" width="44" height="44" color="#238270"/>
+<text x="600.0" y="592" font-size="18" fill="#238270" font-weight="700" text-anchor="middle">Dự báo chờ</text>
+<text x="600.0" y="618" font-size="18" fill="#238270" font-weight="700" text-anchor="middle">khi xe đến</text>
+<rect x="772" y="505" width="260" height="148" rx="16" fill="#F2EDFA" stroke="#7654A6" stroke-width="1.6"/>
+<use href="#balance" x="880.0" y="522" width="44" height="44" color="#7654A6"/>
+<text x="902.0" y="592" font-size="18" fill="#7654A6" font-weight="700" text-anchor="middle">Lọc Pareto</text>
+<text x="902.0" y="618" font-size="18" fill="#7654A6" font-weight="700" text-anchor="middle">Chọn Minimax</text>
+<rect x="1073" y="505" width="178" height="148" rx="16" fill="#EFF5FE" stroke="#3067AF" stroke-width="1.6"/>
+<use href="#pin" x="1140.0" y="522" width="44" height="44" color="#3067AF"/>
+<text x="1162.0" y="592" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">Khuyến nghị</text>
+<text x="1162.0" y="618" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">trạm</text>
+<text x="1162.0" y="639" font-size="12" fill="#5B6C83" font-weight="400" text-anchor="middle">Không giữ chỗ</text>
+<polygon points="1393,502 1501,577 1393,652 1285,577" fill="#EAF2FF" stroke="#3067AF" stroke-width="2"/>
+<use href="#person" x="1376.0" y="519" width="34" height="34" color="#3067AF"/>
+<text x="1393" y="582" font-size="17" fill="#3067AF" font-weight="700" text-anchor="middle">Xe tự</text>
+<text x="1393" y="606" font-size="17" fill="#3067AF" font-weight="700" text-anchor="middle">quyết định</text>
+<rect x="1535" y="505" width="160" height="148" rx="16" fill="#EFF5FE" stroke="#3067AF" stroke-width="1.6"/>
+<use href="#travel" x="1593.0" y="522" width="44" height="44" color="#3067AF"/>
+<text x="1615.0" y="592" font-size="18" fill="#3067AF" font-weight="700" text-anchor="middle">Di chuyển</text>
+<rect x="1730" y="505" width="162" height="148" rx="16" fill="#E8F5EF" stroke="#238270" stroke-width="1.6"/>
+<use href="#charger" x="1789.0" y="522" width="44" height="44" color="#238270"/>
+<text x="1811.0" y="592" font-size="18" fill="#238270" font-weight="700" text-anchor="middle">Đến trạm</text>
+<text x="1811.0" y="618" font-size="18" fill="#238270" font-weight="700" text-anchor="middle">Chờ / sạc</text>
+<path d="M212 577 H243" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M437 577 H466" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M730 577 H768" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M1032 577 H1069" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M1251 577 H1281" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M1501 577 H1531" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<path d="M1695 577 H1726" fill="none" stroke="#76859B" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#slate)"/>
+<rect x="772" y="685" width="260" height="73" rx="12" fill="#FAF7FE" stroke="#D8CBEA" stroke-width="1.6"/>
+<text x="902" y="716" font-size="14" fill="#7654A6" font-weight="400" text-anchor="middle">Thời gian đi • Quãng đường</text>
+<text x="902" y="739" font-size="14" fill="#7654A6" font-weight="400" text-anchor="middle">Năng lượng • Thời gian chờ</text>
+<path d="M902 653 V681" fill="none" stroke="#AB95CB" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M1393 652 V729" fill="none" stroke="#3067AF" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#blue)"/>
+<text x="1410" y="706" font-size="13" fill="#3067AF" font-weight="400" text-anchor="start">Chưa chọn</text>
+<rect x="1304" y="734" width="178" height="55" rx="26" fill="#F6F9FE" stroke="#A8BDD9" stroke-width="1.6"/>
+<text x="1393" y="767" font-size="16" fill="#3067AF" font-weight="400" text-anchor="middle">Chờ đợt sau</text>
+<path d="M1304 762 H1180 Q1162 762 1162 744 V657" fill="none" stroke="#3067AF" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#blue)"/>
+<path d="M1811 653 V828 Q1811 850 1789 850 H56 Q34 850 34 828 V205 Q34 184 55 184 H644 Q652 184 652 194 V221 Q652 229 660 229 H667" fill="none" stroke="#238270" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#green)"/>
+<text x="1200" y="832" font-size="17" fill="#238270" font-weight="400" text-anchor="middle">Xe thực sự đến → cập nhật lịch sử tại trạm</text>
+<path d="M1540 107 H1576" stroke="#238270" stroke-width="2" stroke-dasharray="6 5"/>
+<text x="1588" y="112" font-size="13" fill="#5B6C83" font-weight="400" text-anchor="start">Nét đứt: tùy chọn / fallback</text>
+</g></svg>

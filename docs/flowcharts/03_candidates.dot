@@ -1,0 +1,73 @@
+digraph "03_candidates" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="03 · Feasible candidates và thông tin tại ETA" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	start [label="build_candidates(EV) tại vị trí / SOC hiện tại" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	clear [label="Reset candidate arrays
+Duyệt station theo index" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	more [label="Còn station?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	hardware [label="Compatible và có installed ports?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	route [label="route_forecast trên road graph
+D_mét, T_phút; ETA = epoch + T
+Snapshot hoặc nominal speed" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	path [label="Có route hợp lệ?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	reserve [label="E_current − c × D_km ≥ B × reserve_SOC / 100?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	add [label="Giữ station, route distance và ETA" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	sort [label="Sort candidates theo ETA
+ALL_FEASIBLE: giữ tất cả
+TOP_K: giữ tối đa max_candidates" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	any [label="Có feasible candidate?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	defer [label="State=deferred nếu chưa deferred
+Unavailable: no_feasible_candidate" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	energy [label="E_travel = c × D_km
+E_arrival = E_current − E_travel
+Target SOC: E_req = max(0, B × target/100 − E_arrival)
+d_nm = 60 × E_req / (eta_ref × P_ref)" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	options [label="Reset received_station_options
+Duyệt từng candidate" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	next [label="Còn candidate chưa query?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	info [label="information_mode?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	live [label="LIVE: station.predict_waiting(epoch, ETA − epoch)
+Dùng state vật lý hiện tại tại trạm" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	limited [label="LIMITED: đọc advertised_waiting snapshot
+slot = ceil(age + ETA_offset − epsilon)
+Không đọc lại queue thật" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	valid [label="Packet / slot / waiting hợp lệ
+và waiting ≥ 0?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	keep [label="Giữ option: [T, D_km, E_travel, W_pred]
+ETA, E_req, d_nm, status, snapshot age
+Replay error / count / spread" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	available [label="Có option available?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	unknown [label="Unavailable: no_valid_station_information
+Không gán unknown waiting thành 0" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	rank [label="Gửi options hợp lệ tới ranking
+Sơ đồ 04" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	start -> clear [label="" style=solid]
+	clear -> more [label="" style=solid]
+	more -> hardware [label="Có" style=solid]
+	hardware -> more [label="Không: bỏ trạm" style=solid]
+	hardware -> route [label="Có" style=solid]
+	route -> path [label="" style=solid]
+	path -> more [label="Không" style=solid]
+	path -> reserve [label="Có" style=solid]
+	reserve -> more [label="Không" style=solid]
+	reserve -> add [label="Có" style=solid]
+	add -> more [label="Trạm tiếp" style=solid]
+	more -> sort [label="Hết" style=solid]
+	sort -> any [label="" style=solid]
+	any -> defer [label="Không" style=solid]
+	any -> energy [label="Có" style=solid]
+	energy -> options [label="" style=solid]
+	options -> next [label="" style=solid]
+	next -> info [label="Có" style=solid]
+	info -> live [label=LIVE style=solid]
+	info -> limited [label=LIMITED style=solid]
+	live -> valid [label="" style=solid]
+	limited -> valid [label="" style=solid]
+	valid -> next [label="Không: bỏ option" style=solid]
+	valid -> keep [label="Có" style=solid]
+	keep -> next [label="" style=solid]
+	next -> available [label="Hết" style=solid]
+	available -> unknown [label="Không" style=solid]
+	available -> rank [label="Có" style=solid]
+}

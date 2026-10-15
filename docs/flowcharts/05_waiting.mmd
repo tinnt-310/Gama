@@ -1,0 +1,69 @@
+flowchart TD
+    n_start(["predict_waiting(issued, ETA_offset ≥ 0)"])
+    n_cached{"Waiting cache có đúng key?<br/>Issued, ETA_offset, forecast, estimator, fallback"}
+    n_returncache(["Trả cached result; tăng cache_hits"])
+    n_shadow["shadow_port_state: rates và free_at<br/>Cổng rảnh + phiên đang sạc + physical FIFO<br/>Không cộng inbound / intention / recommendations"]
+    n_b3["Discrete shadow không thêm future arrivals<br/>W_physical = max(0, min free_at − ETA_offset)<br/>Không có cổng: −1"]
+    n_mode{"waiting_forecast_mode = B3?"}
+    n_physical["Result: W_physical; status=physical_only"]
+    n_horizon["B4 / B4-N: H = max(1, ceil(ETA_offset / 5))<br/>replay_windows(issued, H)"]
+    n_history{"Đủ closed bins, observed arrivals<br/>và history cho H?"}
+    n_cold["Giữ W_physical<br/>status=cold_start / insufficient_horizon"]
+    n_forecast["B4: local moving average<br/>B4-N: workload forecast đã issue, nếu còn coverage<br/>Horizon thiếu coverage dùng local value"]
+    n_scan["Duyệt history windows đã hoàn tất trước query<br/>Tính normalized RMS mismatch với forecast<br/>Scale = max(1, local_value)"]
+    n_calibrated{"Replay similarity threshold ≥ 0?"}
+    n_unconfigured["Giữ W_physical<br/>status=ood_threshold_not_calibrated"]
+    n_accepted{"Có window mismatch ≤ threshold?"}
+    n_ood["Giữ W_physical<br/>status=out_of_distribution"]
+    n_scenarios["Chọn tối đa replay_scenarios windows tốt nhất<br/>Giữ arrival offsets và energy từng session<br/>Không scale energy / sinh thêm xe"]
+    n_replay["Mỗi scenario: chạy discrete shadow trên bản copy<br/>Arrivals ≤ ETA được xử lý trước probe<br/>FIFO; tick rounding; earliest port, hòa chọn power cao"]
+    n_mean["W_pred = mean(W_s); status=replay<br/>scenario_count; spread = max(W_s) − min(W_s)"]
+    n_fluidgate{"Mode khác B3 và:<br/>estimator=fluid HOẶC<br/>(status=OOD và fallback=fluid)?"}
+    n_fluid["fluid_waiting từ LOCAL baseline<br/>Residual capacity và causal backlog<br/>Không dùng corrected workload của B4-N"]
+    n_fluidvalid{"Fluid đủ horizon: W_fluid ≥ 0?"}
+    n_fluidok["W = max(W_physical, W_fluid)<br/>status=fluid_approximation / ood_fluid_fallback"]
+    n_fluidfail["W = −1; status=fluid_horizon_exhausted<br/>Option sẽ unavailable"]
+    n_save(["Lưu cache / last_wait_result; cập nhật counters<br/>Trả W, status, issued_at, replay error / count / spread"])
+    n_start --> n_cached
+    n_cached -->|"Có"| n_returncache
+    n_cached -->|"Không"| n_shadow
+    n_shadow --> n_b3
+    n_b3 --> n_mode
+    n_mode -->|"Có"| n_physical
+    n_physical --> n_save
+    n_mode -->|"Không"| n_horizon
+    n_horizon --> n_history
+    n_history -->|"Không"| n_cold
+    n_cold --> n_fluidgate
+    n_history -->|"Có"| n_forecast
+    n_forecast --> n_scan
+    n_scan --> n_calibrated
+    n_calibrated -->|"Không"| n_unconfigured
+    n_unconfigured --> n_fluidgate
+    n_calibrated -->|"Có"| n_accepted
+    n_accepted -->|"Không"| n_ood
+    n_ood --> n_fluidgate
+    n_accepted -->|"Có"| n_scenarios
+    n_scenarios --> n_replay
+    n_replay --> n_mean
+    n_mean --> n_fluidgate
+    n_fluidgate -->|"Không"| n_save
+    n_fluidgate -->|"Có"| n_fluid
+    n_fluid --> n_fluidvalid
+    n_fluidvalid -->|"Có"| n_fluidok
+    n_fluidvalid -->|"Không"| n_fluidfail
+    n_fluidok --> n_save
+    n_fluidfail --> n_save
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_shadow,n_b3,n_horizon,n_forecast,n_scan,n_scenarios,n_replay,n_fluid station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_cached,n_mode,n_history,n_calibrated,n_accepted,n_fluidgate,n_fluidvalid decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_physical,n_cold,n_unconfigured,n_ood,n_mean,n_fluidok,n_fluidfail data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_returncache,n_save end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_start start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

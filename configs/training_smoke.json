@@ -1,0 +1,14 @@
+{
+  "optimizer_seeds": [41001],
+  "population": 16,
+  "validation_every": 16,
+  "min_evaluations": 32,
+  "max_evaluations": 32,
+  "patience": 3,
+  "workers": 8,
+  "warmup_minutes": 5,
+  "measure_minutes": 10,
+  "train_seed": 11001,
+  "validation_seed": 21001,
+  "profile": "smoke"
+}

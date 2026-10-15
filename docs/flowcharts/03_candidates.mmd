@@ -1,0 +1,65 @@
+flowchart TD
+    n_start(["build_candidates(EV) tại vị trí / SOC hiện tại"])
+    n_clear["Reset candidate arrays<br/>Duyệt station theo index"]
+    n_more{"Còn station?"}
+    n_hardware{"Compatible và có installed ports?"}
+    n_route["route_forecast trên road graph<br/>D_mét, T_phút; ETA = epoch + T<br/>Snapshot hoặc nominal speed"]
+    n_path{"Có route hợp lệ?"}
+    n_reserve{"E_current − c × D_km ≥ B × reserve_SOC / 100?"}
+    n_add["Giữ station, route distance và ETA"]
+    n_sort["Sort candidates theo ETA<br/>ALL_FEASIBLE: giữ tất cả<br/>TOP_K: giữ tối đa max_candidates"]
+    n_any{"Có feasible candidate?"}
+    n_defer(["State=deferred nếu chưa deferred<br/>Unavailable: no_feasible_candidate"])
+    n_energy["E_travel = c × D_km<br/>E_arrival = E_current − E_travel<br/>Target SOC: E_req = max(0, B × target/100 − E_arrival)<br/>d_nm = 60 × E_req / (eta_ref × P_ref)"]
+    n_options["Reset received_station_options<br/>Duyệt từng candidate"]
+    n_next{"Còn candidate chưa query?"}
+    n_info{"information_mode?"}
+    n_live["LIVE: station.predict_waiting(epoch, ETA − epoch)<br/>Dùng state vật lý hiện tại tại trạm"]
+    n_limited["LIMITED: đọc advertised_waiting snapshot<br/>slot = ceil(age + ETA_offset − epsilon)<br/>Không đọc lại queue thật"]
+    n_valid{"Packet / slot / waiting hợp lệ<br/>và waiting ≥ 0?"}
+    n_keep["Giữ option: [T, D_km, E_travel, W_pred]<br/>ETA, E_req, d_nm, status, snapshot age<br/>Replay error / count / spread"]
+    n_available{"Có option available?"}
+    n_unknown(["Unavailable: no_valid_station_information<br/>Không gán unknown waiting thành 0"])
+    n_rank(["Gửi options hợp lệ tới ranking<br/>Sơ đồ 04"])
+    n_start --> n_clear
+    n_clear --> n_more
+    n_more -->|"Có"| n_hardware
+    n_hardware -->|"Không: bỏ trạm"| n_more
+    n_hardware -->|"Có"| n_route
+    n_route --> n_path
+    n_path -->|"Không"| n_more
+    n_path -->|"Có"| n_reserve
+    n_reserve -->|"Không"| n_more
+    n_reserve -->|"Có"| n_add
+    n_add -->|"Trạm tiếp"| n_more
+    n_more -->|"Hết"| n_sort
+    n_sort --> n_any
+    n_any -->|"Không"| n_defer
+    n_any -->|"Có"| n_energy
+    n_energy --> n_options
+    n_options --> n_next
+    n_next -->|"Có"| n_info
+    n_info -->|"LIVE"| n_live
+    n_info -->|"LIMITED"| n_limited
+    n_live --> n_valid
+    n_limited --> n_valid
+    n_valid -->|"Không: bỏ option"| n_next
+    n_valid -->|"Có"| n_keep
+    n_keep --> n_next
+    n_next -->|"Hết"| n_available
+    n_available -->|"Không"| n_unknown
+    n_available -->|"Có"| n_rank
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_clear,n_route,n_add,n_sort,n_energy,n_options process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_live,n_limited station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_more,n_hardware,n_path,n_reserve,n_any,n_next,n_info,n_valid,n_available decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_keep data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_defer,n_unknown,n_rank end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_start start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

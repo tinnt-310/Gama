@@ -1,0 +1,52 @@
+digraph "09_rush" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="09 · Giờ cao điểm: tăng hoạt động và thêm 30% xe" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	clock [label="Đồng hồ lịch: start_hour + elapsed / 3600
+Cửa sổ sáng 05:30–07:30; chiều 17:00–20:00
+Reflex dùng các điều kiện clock và cờ ngày" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	rush [label="rush và have_rush?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	new [label="Chưa spawn trong window_id hiện tại?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	budget [label="Mỗi loại: extra_cap=floor(base × rush_extra_percent/100)
+new_count=max(0,extra_cap − extras còn sống)
+Spawn phần thiếu một lần / window" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	numbers [label="30% default: +900 car, +341 taxi EV, +178 private EV
+Tổng thêm 1,419 xe, gồm 519 EV
+Tối đa cohort: 6,151 xe, gồm 2,251 EV" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	base [label="Xe nền đang nghỉ, không request / charging
+Chưa được kích hoạt trong window
+Đủ điều kiện giờ departure / home / destination?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	depart [label="Tái dùng lịch cá nhân để phát chuyến
+Sáng tới work; chiều tới home
+Không thay destination EV đang đi sạc" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	active [label="Di chuyển / SOC / request theo lifecycle chung
+Ghi population và rush_departures" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	end [label="Ngoài rush hoặc have_rush=false
+Duyệt toàn bộ extras" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	protected [label="Extra EV còn needs_charging
+hoặc is_charging?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	retire [label="Unregister và die trong tick cleanup
+Xe nền không bị xóa bởi bước này" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	hold [label="Giữ EV; thêm vào charge_rush_vehi
+Cho hoàn thành hoặc hủy session" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	completed [label="EV đã chết hoặc không còn needs_charging?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	later [label="Retire EV còn sống; bỏ khỏi tracking list
+Survivors ở window sau đã được trừ khỏi extra_cap" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	clock -> rush [label="" style=solid]
+	rush -> new [label="Có" style=solid]
+	new -> budget [label="Có" style=solid]
+	budget -> numbers [label="" style=solid]
+	numbers -> base [label="" style=solid]
+	new -> base [label="Không" style=solid]
+	base -> depart [label="Có" style=solid]
+	depart -> active [label="" style=solid]
+	base -> active [label="Không" style=solid]
+	active -> clock [label="Tick tiếp" style=solid]
+	rush -> end [label="Không" style=solid]
+	end -> protected [label="" style=solid]
+	protected -> retire [label="Không" style=solid]
+	protected -> hold [label="Có" style=solid]
+	hold -> completed [label="" style=solid]
+	completed -> hold [label="Chưa" style=solid]
+	completed -> later [label="Có" style=solid]
+}

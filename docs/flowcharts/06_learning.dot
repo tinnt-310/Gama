@@ -1,0 +1,85 @@
+digraph "06_learning" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="06 · Station-local history, phát forecast và ridge online" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	obs [label="Actual arrival tại station
+observe_arrival(at, E_req_actual)" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	bin [label="Lưu (at, energy)
+Y_bin += 60 × energy / (eta_ref × P_ref)
+Bin vắng có workload = 0" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	epoch [label="Station tới kỳ phát forecast (bin 5 phút)
+Packet cũ đã được delivery barrier xử lý" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	mature [label="mature_forecasts: chọn labels
+có target_bin < closed bin index" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	score [label="Lấy actual workload đã quan sát
+Score local / corrected forecasts đã phát trước đó" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	train [label="B4-N và correction_enabled?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	update [label="Mỗi horizon: khởi tạo A=lambda I, b=0 nếu cần
+Dùng phi và baseline đã lưu lúc issue
+y = (actual − baseline) / 30
+A += phi phiᵀ; b += phi y; count += 1" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	remove [label="Bỏ labels đã trưởng thành khỏi pending list" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	prune [label="Cắt observation history theo retention
+576 bins × 5 phút ≈ 48 giờ" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	local [label="local_value = mean của tối đa 12 closed bins
+Chưa có bin đóng: 0
+V1 dùng cùng mean cho các horizons" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	h [label="Duyệt horizon h = 0 ... 23" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	features [label="phi = [1, neighbor_mean/30, (neighbor−local)/30,
+mean_packet_age_bins, missing_fraction, h/24]
+Chỉ đọc packets đã nhận và còn phủ horizon" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	gate [label="B4-N, enabled, có model
+và count ≥ max(50, 5p), p=6?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	baseline [label="corrected = local_value" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	ridge [label="Giải A w = b bằng Gaussian elimination
+corrected = max(0, local_value + 30 × wᵀphi)" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	label [label="Lưu issued forecast và pending label
+Issued_at, target bin, horizon, phi, local, corrected" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	more [label="Còn horizon?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	cache [label="Clear waiting_cache và replay_cache" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	neighbor [label="Forecast mode B4-N?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	packet [label="Gửi neighbor packet: LOCAL workload vector
+Residual capacity, unit, issued/deliver timestamps
+Degree=3 trước đối xứng; không raw EV queue" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	limited [label="Information mode LIMITED?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	curve [label="Tính waiting curve offsets 0 ... 120 phút
+Qua predict_waiting; giữ statuses và issued_at" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	end [label="Forecast sẵn cho queries / epochs tiếp theo
+Ghi forecast và communication diagnostics" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	note [label="Capacity có trong packet nhưng chưa vào phi
+Ridge học workload correction, không học weights cost
+Correction mặc định tắt; B4 replay threshold mặc định −1" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	{
+		rank=same
+		obs
+		epoch
+	}
+	obs -> bin [label="" style=solid]
+	bin -> mature [label="Dữ liệu tại kỳ phát sau" style=solid]
+	epoch -> mature [label="" style=solid]
+	mature -> score [label="" style=solid]
+	score -> train [label="" style=solid]
+	train -> update [label="Có" style=solid]
+	train -> remove [label="Không" style=solid]
+	update -> remove [label="" style=solid]
+	remove -> prune [label="" style=solid]
+	prune -> local [label="" style=solid]
+	local -> h [label="" style=solid]
+	h -> features [label="" style=solid]
+	features -> gate [label="" style=solid]
+	gate -> baseline [label="Không" style=solid]
+	gate -> ridge [label="Có" style=solid]
+	baseline -> label [label="" style=solid]
+	ridge -> label [label="" style=solid]
+	label -> more [label="" style=solid]
+	more -> h [label="Có" style=solid]
+	more -> cache [label="Không" style=solid]
+	cache -> neighbor [label="" style=solid]
+	neighbor -> packet [label="Có" style=solid]
+	neighbor -> limited [label="Không" style=solid]
+	packet -> limited [label="" style=solid]
+	limited -> curve [label="Có" style=solid]
+	limited -> end [label="Không" style=solid]
+	curve -> end [label="" style=solid]
+	features -> note [label="Giới hạn cài đặt" style=dashed]
+}

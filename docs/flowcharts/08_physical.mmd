@@ -1,0 +1,50 @@
+flowchart TD
+    n_arrival(["Arrival hợp lệ → gọi process_queue"])
+    n_tick(["service_tick → advance_service"])
+    n_reconcile["Clear waiting cache; reconcile_sessions<br/>Dọn dead sessions, terminal events và cổng"]
+    n_pending{"Phiên completion_pending<br/>và clock ≥ service_finish?"}
+    n_finish["stop_charging: completed event một lần<br/>Giải phóng cổng; served_customer += 1<br/>needs_charging=false; current_station=nil"]
+    n_queue["process_queue: reconcile và lọc FIFO hợp lệ"]
+    n_free{"Queue còn xe và có cổng rảnh?"}
+    n_dispatch["Lấy EV đầu FIFO<br/>Chọn cổng rảnh mạnh nhất: 250,180,150,60,30,11<br/>Occupy port; state=charging; service_start=clock"]
+    n_waitmetric["W_actual = service_start − arrival_time<br/>Tăng started; ghi service_started event"]
+    n_waiters["EV còn waiting: cập nhật elapsed waiting<br/>Chưa start thì waiting cuối cùng chưa biết"]
+    n_integrate["Với mỗi EV charging chưa completion_pending:<br/>E_remaining = min(E_req − E_delivered, battery headroom)<br/>Delta_E = min(max(0,E_remaining), eta × P × step/3600)"]
+    n_soc["E_delivered += Delta_E<br/>SOC += 100 × Delta_E / B; cap 100%<br/>Grid_kWh += Delta_E / eta<br/>Charging_min += 60 × Delta_E / (eta × P)"]
+    n_complete{"Đủ requested energy<br/>hoặc SOC đạt 100%?"}
+    n_mark["service_finish = clock + charge_seconds/60<br/>completion_pending=true<br/>Chưa release port trong integration interval này"]
+    n_next(["Lưu physical session snapshot<br/>Chờ service tick tiếp theo"])
+    n_rates["B=60 kWh, eta=0.9: SOC tăng mỗi phút<br/>11 kW: 0.275 điểm %; 30: 0.75; 60: 1.5<br/>150: 3.75; 180: 4.5; 250: 6.25<br/>Cuối phiên cap theo demand; chưa có taper"]
+    n_tick --> n_reconcile
+    n_reconcile --> n_pending
+    n_pending -->|"Có"| n_finish
+    n_finish --> n_queue
+    n_pending -->|"Không"| n_queue
+    n_arrival --> n_queue
+    n_queue --> n_free
+    n_free -->|"Có"| n_dispatch
+    n_dispatch --> n_waitmetric
+    n_waitmetric -->|"EV tiếp"| n_free
+    n_free -->|"Không; khi trong service tick"| n_waiters
+    n_waiters --> n_integrate
+    n_integrate --> n_soc
+    n_soc --> n_complete
+    n_complete -->|"Có"| n_mark
+    n_mark --> n_next
+    n_complete -->|"Không"| n_next
+    n_next -->|"Tick sau"| n_tick
+    n_soc -.->|"Ví dụ default"| n_rates
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_reconcile,n_finish,n_queue,n_dispatch,n_waiters,n_integrate,n_soc,n_mark station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_pending,n_free,n_complete decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_waitmetric data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_next end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_arrival,n_tick start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_rates note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

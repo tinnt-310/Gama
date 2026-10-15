@@ -1,0 +1,65 @@
+flowchart TD
+    n_start(["execute_ev_choice(EV)"])
+    n_valid{"Có options và state requested/deferred?"}
+    n_wait(["Chưa áp destination<br/>Giữ pending cho epoch tiếp theo"])
+    n_mode{"ev_choice_mode?"}
+    n_follow["FOLLOW: lấy recommended option"]
+    n_self["SELF_INTERESTED: rank lại options<br/>Theo personal_choice_method / personal_weights"]
+    n_trace["TRACE: yêu cầu trace cho request<br/>Lấy record mới nhất có time ≤ epoch"]
+    n_tracestatus{"Trace record hợp lệ và chọn station<br/>trong options hiện có?"}
+    n_traceerror(["Trace thiếu: CHOICE_TRACE_MISSING<br/>Assertion; không tạo trace giả"])
+    n_intention["Nếu publish_intention: gửi intention audit<br/>Không giữ cổng / thêm queue / cộng vào forecast"]
+    n_apply["apply_station_choice: đặt current/chosen_station<br/>Choice time, ETA, predicted energy / wait<br/>Reset distance; state=en_route; ghi choice / en_route"]
+    n_path["Native compute_path tới station access node<br/>Không giữ candidate path object bất biến"]
+    n_drive["Drive theo road graph và congestion thực tế<br/>D = max(0, remaining_before − remaining_after)<br/>SOC -= 100 × c × D_m / (1000 × B)"]
+    n_terminal{"Hủy / agent bị xóa / hết pin?"}
+    n_cleanup(["Terminal event một lần; cleanup<br/>Queue, cổng, intention, pending metadata<br/>Stranded: unregister và die"])
+    n_reached{"Đã tới access node đúng trạm<br/>và final_target=nil?"}
+    n_due["Nếu vừa đi tới: station_arrival_due=(time+step)/60<br/>Materialize arrival khi clock đạt boundary"]
+    n_enqueue["enqueue_arrival kiểm live EV, đúng current_station<br/>State hợp lệ, distance < 2m, chưa arrival lần trước"]
+    n_demand["Xóa intention / inbound nếu có; clear waiting cache<br/>Target SOC: tính lại E_req từ SOC thực tế tại arrival"]
+    n_observe["Ghi arrival time và local observation<br/>State=waiting; arrived_customer += 1<br/>Thêm cuối FIFO; ghi arrival event"]
+    n_fifo(["process_queue; cập nhật peak_queue<br/>Sơ đồ 08"])
+    n_noroute["EV en_route không tự được re-recommend<br/>Queue tăng giữa hành trình không tự đổi destination"]
+    n_start --> n_valid
+    n_valid -->|"Không"| n_wait
+    n_valid -->|"Có"| n_mode
+    n_mode -->|"DEFER"| n_wait
+    n_mode -->|"FOLLOW"| n_follow
+    n_mode -->|"SELF"| n_self
+    n_mode -->|"TRACE"| n_trace
+    n_trace --> n_tracestatus
+    n_tracestatus -->|"Thiếu trace"| n_traceerror
+    n_tracestatus -->|"Chưa tới giờ / trạm rỗng / ngoài options"| n_wait
+    n_tracestatus -->|"Có"| n_intention
+    n_follow --> n_intention
+    n_self --> n_intention
+    n_intention --> n_apply
+    n_apply --> n_path
+    n_path -->|"Đã ở đúng access node"| n_enqueue
+    n_path -->|"Cần di chuyển"| n_drive
+    n_drive --> n_terminal
+    n_terminal -->|"Có"| n_cleanup
+    n_terminal -->|"Không"| n_reached
+    n_reached -->|"Chưa đến"| n_drive
+    n_reached -->|"Tới cuối path"| n_due
+    n_due -->|"Clock đạt arrival_due"| n_enqueue
+    n_drive -.->|"Behavior hiện tại"| n_noroute
+    n_enqueue --> n_demand
+    n_demand --> n_observe
+    n_observe --> n_fifo
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_follow,n_self,n_trace,n_apply,n_path,n_drive,n_due process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_enqueue,n_demand,n_observe station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_valid,n_mode,n_tracestatus,n_terminal,n_reached decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_intention data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_wait,n_traceerror,n_cleanup,n_fifo end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_start start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_noroute note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

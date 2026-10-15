@@ -1,0 +1,64 @@
+digraph "04_ranking" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="04 · Pareto và minimax normalized regret" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	start [label="Options hợp lệ: f_m = [T, D, E_travel, W_pred]
+Mọi tiêu chí đều tối thiểu hóa" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	check [label="Kiểm tra criteria không âm, normalization / method
+Weighted / monetary: 4 weights ≥ 0, tổng > 0" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	pareto [label="So sánh từng option với tất cả competitors
+Dominated khi competitor không tệ hơn mọi tiêu chí
+và tốt hơn ít nhất một; có numeric tolerance" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	flags [label="Đánh dấu pareto=true/false
+Giữ cả options dominated để audit" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	norm [label="normalization_mode?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	feasible [label="feasible (mặc định): min/max
+trên mọi options có thông tin hợp lệ" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	front [label="pareto (ablation): min/max
+chỉ trên Pareto set" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	regret [label="l_j = min f_j; u_j = max f_j
+Range ≤ epsilon: r_mj = 0
+Ngược lại: r_mj = (f_mj − l_j) / (u_j − l_j)" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	method [label="recommendation_method?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	minimax [label="minimax: R_m = max_j r_mj
+Eligible = Pareto set" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	nearest [label="nearest: score = D_km
+eta: score = T_phút
+Eligible = mọi valid options" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	other [label="time_wait: score = T + W
+weighted_sum: score = sum alpha_j × r_mj
+monetary: score = sum alpha_j × f_mj
+Eligible = Pareto set" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	best [label="Chọn score nhỏ nhất
+Tolerance score = 1e−10" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	tie [label="Nếu hòa: minimax / weighted / time_wait / monetary
+chọn T+W nhỏ nhất, rồi station.index nhỏ nhất
+Nearest / eta: hòa thì station.index nhỏ nhất" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	result [label="Đánh dấu winner, alternative ranks
+Lưu Pareto flags, regrets, score_method" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	record [label="Tăng recommendation_version
+Lưu recommendation và candidate rows
+Chưa đổi destination / queue / inbound" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	note [label="Min/max thay đổi theo candidate set
+Không phải weights được train
+Minimax từng EV không tối ưu tổng waiting thành phố" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	start -> check [label="" style=solid]
+	check -> pareto [label="" style=solid]
+	pareto -> flags [label="" style=solid]
+	flags -> norm [label="" style=solid]
+	norm -> feasible [label=feasible style=solid]
+	norm -> front [label=pareto style=solid]
+	feasible -> regret [label="" style=solid]
+	front -> regret [label="" style=solid]
+	regret -> method [label="" style=solid]
+	method -> minimax [label="Chính" style=solid]
+	method -> nearest [label="B1 / B2" style=solid]
+	method -> other [label="Đối chứng khác" style=solid]
+	minimax -> best [label="" style=solid]
+	nearest -> best [label="" style=solid]
+	other -> best [label="" style=solid]
+	regret -> note [label="Ý nghĩa" style=dashed]
+	best -> tie [label="" style=solid]
+	tie -> result [label="" style=solid]
+	result -> record [label="" style=solid]
+}

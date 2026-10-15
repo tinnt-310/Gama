@@ -1,0 +1,67 @@
+flowchart TD
+    n_obs(["Actual arrival tại station<br/>observe_arrival(at, E_req_actual)"])
+    n_bin["Lưu (at, energy)<br/>Y_bin += 60 × energy / (eta_ref × P_ref)<br/>Bin vắng có workload = 0"]
+    n_epoch(["Station tới kỳ phát forecast (bin 5 phút)<br/>Packet cũ đã được delivery barrier xử lý"])
+    n_mature["mature_forecasts: chọn labels<br/>có target_bin < closed bin index"]
+    n_score["Lấy actual workload đã quan sát<br/>Score local / corrected forecasts đã phát trước đó"]
+    n_train{"B4-N và correction_enabled?"}
+    n_update["Mỗi horizon: khởi tạo A=lambda I, b=0 nếu cần<br/>Dùng phi và baseline đã lưu lúc issue<br/>y = (actual − baseline) / 30<br/>A += phi phiᵀ; b += phi y; count += 1"]
+    n_remove["Bỏ labels đã trưởng thành khỏi pending list"]
+    n_prune["Cắt observation history theo retention<br/>576 bins × 5 phút ≈ 48 giờ"]
+    n_local["local_value = mean của tối đa 12 closed bins<br/>Chưa có bin đóng: 0<br/>V1 dùng cùng mean cho các horizons"]
+    n_h["Duyệt horizon h = 0 ... 23"]
+    n_features["phi = [1, neighbor_mean/30, (neighbor−local)/30,<br/>mean_packet_age_bins, missing_fraction, h/24]<br/>Chỉ đọc packets đã nhận và còn phủ horizon"]
+    n_gate{"B4-N, enabled, có model<br/>và count ≥ max(50, 5p), p=6?"}
+    n_baseline["corrected = local_value"]
+    n_ridge["Giải A w = b bằng Gaussian elimination<br/>corrected = max(0, local_value + 30 × wᵀphi)"]
+    n_label["Lưu issued forecast và pending label<br/>Issued_at, target bin, horizon, phi, local, corrected"]
+    n_more{"Còn horizon?"}
+    n_cache["Clear waiting_cache và replay_cache"]
+    n_neighbor{"Forecast mode B4-N?"}
+    n_packet["Gửi neighbor packet: LOCAL workload vector<br/>Residual capacity, unit, issued/deliver timestamps<br/>Degree=3 trước đối xứng; không raw EV queue"]
+    n_limited{"Information mode LIMITED?"}
+    n_curve["Tính waiting curve offsets 0 ... 120 phút<br/>Qua predict_waiting; giữ statuses và issued_at"]
+    n_end(["Forecast sẵn cho queries / epochs tiếp theo<br/>Ghi forecast và communication diagnostics"])
+    n_note["Capacity có trong packet nhưng chưa vào phi<br/>Ridge học workload correction, không học weights cost<br/>Correction mặc định tắt; B4 replay threshold mặc định −1"]
+    n_obs --> n_bin
+    n_bin -->|"Dữ liệu tại kỳ phát sau"| n_mature
+    n_epoch --> n_mature
+    n_mature --> n_score
+    n_score --> n_train
+    n_train -->|"Có"| n_update
+    n_train -->|"Không"| n_remove
+    n_update --> n_remove
+    n_remove --> n_prune
+    n_prune --> n_local
+    n_local --> n_h
+    n_h --> n_features
+    n_features --> n_gate
+    n_gate -->|"Không"| n_baseline
+    n_gate -->|"Có"| n_ridge
+    n_baseline --> n_label
+    n_ridge --> n_label
+    n_label --> n_more
+    n_more -->|"Có"| n_h
+    n_more -->|"Không"| n_cache
+    n_cache --> n_neighbor
+    n_neighbor -->|"Có"| n_packet
+    n_neighbor -->|"Không"| n_limited
+    n_packet --> n_limited
+    n_limited -->|"Có"| n_curve
+    n_limited -->|"Không"| n_end
+    n_curve --> n_end
+    n_features -.->|"Giới hạn cài đặt"| n_note
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_bin,n_mature,n_update,n_remove,n_prune,n_local,n_h,n_features,n_baseline,n_ridge,n_cache,n_packet,n_curve station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_train,n_gate,n_more,n_neighbor,n_limited decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_score,n_label data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_end end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_obs,n_epoch start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_note note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

@@ -1,0 +1,48 @@
+flowchart TD
+    n_begin(["recommendation_epoch tới hạn"])
+    n_init{"Đã initialize_recommendation?"}
+    n_setup["Kiểm tra mode / backend / weights / trace<br/>Tạo neighbor graph; xuất config"]
+    n_at["epoch_min = time / 60<br/>Bắt đầu đo runtime máy"]
+    n_receive["Mọi trạm: nhận packet đã tới hạn giao<br/>receive_available_forecasts"]
+    n_issue["Trạm tới next_forecast_min:<br/>mature labels → issue_station_forecast<br/>Đặt lần phát tiếp sau một bin"]
+    n_pending["Lấy pending EVs: requested hoặc deferred<br/>Không lấy en_route, waiting, charging"]
+    n_more{"Còn EV chưa tạo recommendation?"}
+    n_generate["generate_recommendation(EV)<br/>Candidate → station query → rank → lưu result"]
+    n_barrier["BARRIER: đã tạo xong recommendations<br/>cho toàn bộ pending EVs"]
+    n_morechoice{"Còn EV chưa xử lý EVChoice?"}
+    n_choice["execute_ev_choice(EV)<br/>Có thể chọn, trì hoãn hoặc dùng trace"]
+    n_export["Cộng runtime; export_recommendations<br/>Xuất candidate, unavailable, forecast / comm diagnostics"]
+    n_end(["Hẹn recommendation epoch tiếp theo"])
+    n_warning["Xe trước chọn trạm không sửa forecast cho xe sau<br/>Nhiều xe giống nhau vẫn có thể cùng chọn một trạm"]
+    n_begin --> n_init
+    n_init -->|"Chưa"| n_setup
+    n_init -->|"Rồi"| n_at
+    n_setup --> n_at
+    n_at --> n_receive
+    n_receive --> n_issue
+    n_issue --> n_pending
+    n_pending --> n_more
+    n_more -->|"Có"| n_generate
+    n_generate -->|"EV tiếp"| n_more
+    n_more -->|"Không"| n_barrier
+    n_barrier --> n_morechoice
+    n_morechoice -->|"Có"| n_choice
+    n_choice -->|"EV tiếp"| n_morechoice
+    n_morechoice -->|"Không"| n_export
+    n_export --> n_end
+    n_barrier -.->|"Hệ quả"| n_warning
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_setup,n_at,n_pending,n_generate,n_barrier,n_choice process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_receive,n_issue station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_init,n_more,n_morechoice decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_export data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_end end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_begin start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_warning note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

@@ -1,0 +1,48 @@
+digraph "02_epoch" {
+	bgcolor=white dpi=130 fontname="DejaVu Sans" fontsize=18 label="02 · Barrier của một đợt recommendation" labelloc=t nodesep=0.34 pad=0.3 rankdir=TB ranksep=0.46 splines=polyline
+	node [fontcolor="#17263C" fontname="DejaVu Sans" fontsize=12 margin="0.16,0.10" penwidth=1.15 style="filled,rounded"]
+	edge [arrowsize=0.65 color="#697990" fontcolor="#334762" fontname="DejaVu Sans" fontsize=10 penwidth=1.0]
+	begin [label="recommendation_epoch tới hạn" color="#4367AA" fillcolor="#EAF2FF" shape=ellipse]
+	init [label="Đã initialize_recommendation?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	setup [label="Kiểm tra mode / backend / weights / trace
+Tạo neighbor graph; xuất config" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	at [label="epoch_min = time / 60
+Bắt đầu đo runtime máy" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	receive [label="Mọi trạm: nhận packet đã tới hạn giao
+receive_available_forecasts" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	issue [label="Trạm tới next_forecast_min:
+mature labels → issue_station_forecast
+Đặt lần phát tiếp sau một bin" color="#31816A" fillcolor="#E6F5EF" shape=box]
+	pending [label="Lấy pending EVs: requested hoặc deferred
+Không lấy en_route, waiting, charging" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	more [label="Còn EV chưa tạo recommendation?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	generate [label="generate_recommendation(EV)
+Candidate → station query → rank → lưu result" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	barrier [label="BARRIER: đã tạo xong recommendations
+cho toàn bộ pending EVs" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	morechoice [label="Còn EV chưa xử lý EVChoice?" color="#A77822" fillcolor="#FFF4D6" shape=diamond]
+	choice [label="execute_ev_choice(EV)
+Có thể chọn, trì hoãn hoặc dùng trace" color="#4367AA" fillcolor="#EAF2FF" shape=box]
+	export [label="Cộng runtime; export_recommendations
+Xuất candidate, unavailable, forecast / comm diagnostics" color="#77609D" fillcolor="#F0EBFA" shape=note]
+	end [label="Hẹn recommendation epoch tiếp theo" color="#A85555" fillcolor="#FCE9E9" shape=ellipse]
+	warning [label="Xe trước chọn trạm không sửa forecast cho xe sau
+Nhiều xe giống nhau vẫn có thể cùng chọn một trạm" color="#7A8291" fillcolor="#F1F3F6" shape=note]
+	begin -> init [label="" style=solid]
+	init -> setup [label="Chưa" style=solid]
+	init -> at [label="Rồi" style=solid]
+	setup -> at [label="" style=solid]
+	at -> receive [label="" style=solid]
+	receive -> issue [label="" style=solid]
+	issue -> pending [label="" style=solid]
+	pending -> more [label="" style=solid]
+	more -> generate [label="Có" style=solid]
+	generate -> more [label="EV tiếp" style=solid]
+	more -> barrier [label="Không" style=solid]
+	barrier -> morechoice [label="" style=solid]
+	morechoice -> choice [label="Có" style=solid]
+	choice -> morechoice [label="EV tiếp" style=solid]
+	morechoice -> export [label="Không" style=solid]
+	export -> end [label="" style=solid]
+	barrier -> warning [label="Hệ quả" style=dashed]
+}

@@ -1,0 +1,45 @@
+flowchart TD
+    n_clock(["Đồng hồ lịch: start_hour + elapsed / 3600<br/>Cửa sổ sáng 05:30–07:30; chiều 17:00–20:00<br/>Reflex dùng các điều kiện clock và cờ ngày"])
+    n_rush{"rush và have_rush?"}
+    n_new{"Chưa spawn trong window_id hiện tại?"}
+    n_budget["Mỗi loại: extra_cap=floor(base × rush_extra_percent/100)<br/>new_count=max(0,extra_cap − extras còn sống)<br/>Spawn phần thiếu một lần / window"]
+    n_numbers["30% default: +900 car, +341 taxi EV, +178 private EV<br/>Tổng thêm 1,419 xe, gồm 519 EV<br/>Tối đa cohort: 6,151 xe, gồm 2,251 EV"]
+    n_base{"Xe nền đang nghỉ, không request / charging<br/>Chưa được kích hoạt trong window<br/>Đủ điều kiện giờ departure / home / destination?"}
+    n_depart["Tái dùng lịch cá nhân để phát chuyến<br/>Sáng tới work; chiều tới home<br/>Không thay destination EV đang đi sạc"]
+    n_active["Di chuyển / SOC / request theo lifecycle chung<br/>Ghi population và rush_departures"]
+    n_end["Ngoài rush hoặc have_rush=false<br/>Duyệt toàn bộ extras"]
+    n_protected{"Extra EV còn needs_charging<br/>hoặc is_charging?"}
+    n_retire(["Unregister và die trong tick cleanup<br/>Xe nền không bị xóa bởi bước này"])
+    n_hold["Giữ EV; thêm vào charge_rush_vehi<br/>Cho hoàn thành hoặc hủy session"]
+    n_completed{"EV đã chết hoặc không còn needs_charging?"}
+    n_later(["Retire EV còn sống; bỏ khỏi tracking list<br/>Survivors ở window sau đã được trừ khỏi extra_cap"])
+    n_clock --> n_rush
+    n_rush -->|"Có"| n_new
+    n_new -->|"Có"| n_budget
+    n_budget --> n_numbers
+    n_numbers --> n_base
+    n_new -->|"Không"| n_base
+    n_base -->|"Có"| n_depart
+    n_depart --> n_active
+    n_base -->|"Không"| n_active
+    n_active -->|"Tick tiếp"| n_clock
+    n_rush -->|"Không"| n_end
+    n_end --> n_protected
+    n_protected -->|"Không"| n_retire
+    n_protected -->|"Có"| n_hold
+    n_hold --> n_completed
+    n_completed -->|"Chưa"| n_hold
+    n_completed -->|"Có"| n_later
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_budget,n_depart,n_active,n_end,n_hold process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_rush,n_new,n_base,n_protected,n_completed decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_numbers data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_retire,n_later end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_clock start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;

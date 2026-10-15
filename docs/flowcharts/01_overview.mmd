@@ -1,0 +1,71 @@
+flowchart TD
+    n_boot(["Bắt đầu experiment"])
+    n_init["Nạp cấu hình, seed, step và giờ bắt đầu<br/>Nạp GIS; tạo graph, access nodes, 11 trạm và xe"]
+    n_out["Tạo thư mục output riêng<br/>Ghi config / input manifest nếu có"]
+    n_tick["Thời gian mô phỏng tiến theo step<br/>Cập nhật lịch xe, rush, giao thông và SOC"]
+    n_need{"EV idle/completed, SOC < 30%<br/>và chưa có nhu cầu / chưa sạc?"}
+    n_req["begin_request: tạo request_id<br/>State=requested; tắt home charging; reset session"]
+    n_due{"Tới coordination epoch<br/>và coordination_enabled?"}
+    n_mode{"runtime_mode?"}
+    n_rec["RECOMMENDATION_RUNTIME<br/>Forecast → candidate → query → ranking<br/>Sơ đồ 02–06"]
+    n_choice["EVChoice chọn hành động / trạm<br/>Sơ đồ 07"]
+    n_picked{"Đã chọn trạm hợp lệ?"}
+    n_pending["Giữ requested/deferred<br/>Thử lại ở epoch tiếp theo"]
+    n_ideal["IDEAL_COORDINATED_ASSIGNMENT<br/>Snapshot → PDHG → GKPS → repair → hard commit<br/>Sơ đồ 10"]
+    n_travel["Di chuyển thực tế tới access node trạm<br/>Trừ SOC theo quãng đường thực tế"]
+    n_alive{"Xe tới trạm hợp lệ<br/>và chưa terminal?"}
+    n_arrival["Actual arrival: xác nhận đúng trạm, đúng thời điểm<br/>Tính lại energy demand; ghi observation local"]
+    n_fifo["Enqueue FIFO → cấp cổng → tích phân sạc<br/>Chỉ arrival mới thêm physical workload<br/>Sơ đồ 08"]
+    n_done(["Session completed<br/>Giải phóng cổng; EV tiếp tục lịch hoạt động"])
+    n_failure(["Cancelled / stranded / agent bị xóa<br/>Ghi terminal một lần; cleanup ledger, queue, cổng"])
+    n_logs["Xuất events, recommendation, forecast, communication<br/>Snapshot station/status; population; thống kê cumulative"]
+    n_feedback["Actual arrivals → history tại từng trạm<br/>Closed bins / nhãn trưởng thành → forecast tương lai"]
+    n_limits["Recommendation không phải reservation<br/>Không re-recommend xe en_route<br/>Không optimizer choices toàn thành phố"]
+    n_offline["Đánh giá offline: actual T, W, T+W, energy<br/>Completed/unfinished; prediction error; herding"]
+    n_boot --> n_init
+    n_init --> n_out
+    n_out --> n_tick
+    n_tick --> n_need
+    n_need -->|"Có"| n_req
+    n_need -->|"Không"| n_due
+    n_req --> n_due
+    n_due -->|"Chưa"| n_tick
+    n_due -->|"Có"| n_mode
+    n_mode -->|"Recommendation"| n_rec
+    n_mode -->|"Ideal benchmark"| n_ideal
+    n_rec --> n_choice
+    n_choice --> n_picked
+    n_picked -->|"Chưa"| n_pending
+    n_pending --> n_tick
+    n_picked -->|"Có"| n_travel
+    n_ideal -->|"Sau hard commit"| n_travel
+    n_travel --> n_alive
+    n_alive -->|"Chưa đến; còn hợp lệ"| n_travel
+    n_alive -->|"Hủy / hết pin / bị xóa"| n_failure
+    n_alive -->|"Đúng arrival"| n_arrival
+    n_arrival --> n_fifo
+    n_fifo -->|"Hoàn tất"| n_done
+    n_fifo -->|"Hủy / bị xóa"| n_failure
+    n_arrival -->|"Dữ liệu quan sát"| n_feedback
+    n_feedback -->|"Epoch tương lai"| n_rec
+    n_done -->|"Nhu cầu mới có thể phát sinh"| n_tick
+    n_rec -.->|"Chú thích"| n_limits
+    n_done --> n_logs
+    n_failure --> n_logs
+    n_logs --> n_offline
+    classDef process fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_init,n_tick,n_req,n_rec,n_choice,n_pending,n_travel process;
+    classDef station fill:#E6F5EF,stroke:#31816A,color:#17263C;
+    class n_arrival,n_fifo,n_feedback station;
+    classDef decision fill:#FFF4D6,stroke:#A77822,color:#17263C;
+    class n_need,n_due,n_mode,n_picked,n_alive decision;
+    classDef data fill:#F0EBFA,stroke:#77609D,color:#17263C;
+    class n_out,n_logs,n_offline data;
+    classDef end fill:#FCE9E9,stroke:#A85555,color:#17263C;
+    class n_done,n_failure end;
+    classDef start fill:#EAF2FF,stroke:#4367AA,color:#17263C;
+    class n_boot start;
+    classDef note fill:#F1F3F6,stroke:#7A8291,color:#17263C;
+    class n_limits note;
+    classDef ideal fill:#FFF0E5,stroke:#AA7143,color:#17263C;
+    class n_ideal ideal;

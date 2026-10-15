@@ -1,0 +1,156 @@
+{
+  "checked_date": "2026-10-09",
+  "source_sha256": {
+    "models/ChargingService.gaml": "f8c80cc0d2fdeb8bb652ae0996635ec930e325c975a7903153632656657b4845",
+    "models/ConvexAssignment.gaml": "877da248d1609e76740a1a2694c36d711757701f3ac19cb7b9a937471f306729",
+    "models/Coordination.gaml": "c444706824f2f45982811bbe6992c76acd205a76624d2676056e5e305987fd18",
+    "models/Mobility.gaml": "67e2011b998c55ef906a4e0256b24d4f9fef7f0fb824aa7a8f5cd799596929f3",
+    "models/Recommendation.gaml": "508716cc1b339f685a96d204439cd279f8001b4b68c80348a79473ffe3d92d8f",
+    "models/StationForecast.gaml": "cd040e6e7395d425408548240375fe38de793ad51d346b7c56f80046b0fbd339",
+    "models/main.gaml": "476f2dc9736c3b8ef3a90ab4f327731731a27597a05c3374338c1ec62179de3b"
+  },
+  "renderer": "Graphviz dot",
+  "diagrams": [
+    {
+      "key": "01_overview",
+      "title": "01 · Toàn bộ vòng đời hệ thống",
+      "nodes": 23,
+      "edges": 31,
+      "png_dimensions": [
+        2589,
+        3124
+      ],
+      "sources": [
+        "models/main.gaml",
+        "models/Mobility.gaml",
+        "models/Recommendation.gaml",
+        "models/ChargingService.gaml",
+        "models/Coordination.gaml"
+      ]
+    },
+    {
+      "key": "02_epoch",
+      "title": "02 · Barrier của một đợt recommendation",
+      "nodes": 15,
+      "edges": 17,
+      "png_dimensions": [
+        1485,
+        1855
+      ],
+      "sources": [
+        "models/Recommendation.gaml"
+      ]
+    },
+    {
+      "key": "03_candidates",
+      "title": "03 · Feasible candidates và thông tin tại ETA",
+      "nodes": 22,
+      "edges": 28,
+      "png_dimensions": [
+        2967,
+        2156
+      ],
+      "sources": [
+        "models/Coordination.gaml",
+        "models/Recommendation.gaml"
+      ]
+    },
+    {
+      "key": "04_ranking",
+      "title": "04 · Pareto và minimax normalized regret",
+      "nodes": 17,
+      "edges": 19,
+      "png_dimensions": [
+        1638,
+        2141
+      ],
+      "sources": [
+        "models/StationForecast.gaml",
+        "models/Recommendation.gaml"
+      ]
+    },
+    {
+      "key": "05_waiting",
+      "title": "05 · Waiting prediction: B3, B4, B4-N và fallback",
+      "nodes": 25,
+      "edges": 30,
+      "png_dimensions": [
+        2662,
+        3577
+      ],
+      "sources": [
+        "models/ChargingService.gaml",
+        "models/StationForecast.gaml"
+      ]
+    },
+    {
+      "key": "06_learning",
+      "title": "06 · Station-local history, phát forecast và ridge online",
+      "nodes": 24,
+      "edges": 28,
+      "png_dimensions": [
+        2083,
+        3388
+      ],
+      "sources": [
+        "models/ChargingService.gaml",
+        "models/StationForecast.gaml",
+        "models/Recommendation.gaml"
+      ]
+    },
+    {
+      "key": "07_choice_arrival",
+      "title": "07 · EVChoice, hành trình và actual arrival",
+      "nodes": 22,
+      "edges": 27,
+      "png_dimensions": [
+        2973,
+        2794
+      ],
+      "sources": [
+        "models/Recommendation.gaml",
+        "models/ChargingService.gaml"
+      ]
+    },
+    {
+      "key": "08_physical",
+      "title": "08 · Physical FIFO, cấp cổng và tích phân năng lượng",
+      "nodes": 16,
+      "edges": 19,
+      "png_dimensions": [
+        1662,
+        2093
+      ],
+      "sources": [
+        "models/ChargingService.gaml"
+      ]
+    },
+    {
+      "key": "09_rush",
+      "title": "09 · Giờ cao điểm: tăng hoạt động và thêm 30% xe",
+      "nodes": 14,
+      "edges": 17,
+      "png_dimensions": [
+        2450,
+        1604
+      ],
+      "sources": [
+        "models/main.gaml"
+      ]
+    },
+    {
+      "key": "10_ideal",
+      "title": "10 · Ideal coordinated assignment — benchmark riêng",
+      "nodes": 23,
+      "edges": 26,
+      "png_dimensions": [
+        2022,
+        3452
+      ],
+      "sources": [
+        "models/Coordination.gaml",
+        "models/ConvexAssignment.gaml"
+      ]
+    }
+  ]
+}

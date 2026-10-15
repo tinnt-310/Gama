@@ -1,0 +1,15 @@
+{
+  "optimizer_seeds": [41001, 41002, 41003],
+  "population": 16,
+  "validation_every": 256,
+  "min_evaluations": 1024,
+  "max_evaluations": 4096,
+  "patience": 3,
+  "relative_improvement": 0.01,
+  "workers": 16,
+  "warmup_minutes": 10,
+  "measure_minutes": 20,
+  "train_seed": 11001,
+  "validation_seed": 21001,
+  "profile": "research"
+}

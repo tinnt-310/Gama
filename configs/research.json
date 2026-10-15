@@ -1,0 +1,9 @@
+{
+  "method": "RANR-AW",
+  "seed": 1001,
+  "warmup_minutes": 1440,
+  "measure_minutes": 2880,
+  "deadline_minutes": 360,
+  "scenarios": 256,
+  "trace": true
+}
