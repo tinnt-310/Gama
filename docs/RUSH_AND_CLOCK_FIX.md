@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Giờ cao điểm, đồng hồ và smoke — 2026-10-08
 
 Theo cấu hình người dùng: B3 trên GIS Nha Trang, 7 ngày, cycle 60 giây, 3.000 xe thường và 1.732 EV nền. Cao điểm vừa tăng hoạt động của xe đang có, vừa bổ sung tối đa 30% mỗi loại.

@@ -1,6 +1,7 @@
 """Register and validate calibration produced by the interactive GAMA experiment."""
 
 from __future__ import annotations
+from .contracts import TERMINAL, validate_ledger, finite_tree, rescore_components, validate_configuration
 from dataclasses import asdict, replace
 from pathlib import Path
 import csv
@@ -78,8 +79,7 @@ def complete(folder: Path) -> dict:
         "private_evs",
         "electric_taxis",
         "samples",
-        "calibrating",
-        "method",
+        "calibrating", "method", "objective_version", "observation_version", "temperature", "p2p_interval", "min_send_seconds", "stabilization", "behavior_case", "failure_beta", "energy_beta", "decline_probability", "abandon_after_minutes",
     ):
         if actual.get(mapping.get(key, key)) != config[key]:
             raise ValueError(f"Collection configuration mismatch: {key}")
@@ -113,7 +113,7 @@ def complete(folder: Path) -> dict:
         or len(ids) != metrics["all_outcome_count"]
     ):
         raise ValueError("Missing or duplicate demand outcomes")
-    terminal = {"completed", "failed", "stranded", "deferred", "unserved"}
+    terminal = TERMINAL
     for row in outcomes:
         if row["status"] not in terminal or any(
             isinstance(v, (int, float)) and not math.isfinite(v) for v in row.values()
@@ -125,6 +125,9 @@ def complete(folder: Path) -> dict:
         isinstance(v, (int, float)) and not math.isfinite(v) for v in metrics.values()
     ):
         raise ValueError("Nonfinite metrics")
+    validate_ledger(json.loads((folder / "opportunities.json").read_text()), json.loads((folder / "opportunity_outcomes.json").read_text()), outcomes)
+    if abs(rescore_components(metrics["objective_components"])-metrics["objective"])>1e-6:
+        raise ValueError("Objective mismatch")
     metrics["wall_seconds"] = time.time() - record["started_at"]
     metrics["exogenous_hash"] = hashlib.sha256(
         "".join(
@@ -179,6 +182,19 @@ def build(root: Path = GUI_ROOT) -> dict:
     }
 
 
+def validate_candidate(folder: Path):
+    record=json.loads((folder/"manifest.json").read_text())
+    candidate=json.loads((folder/"candidate.json").read_text())
+    if record.get("status")!="running" or record.get("source")!=provenance() or candidate!=record.get("parameters"):
+        raise ValueError("Candidate registration/provenance mismatch")
+    if record.get("backend")!="GAMA" or candidate.get("schema")!="gama-ranr-v3" or candidate.get("environment_version")!=ENVIRONMENT_VERSION:
+        raise ValueError("Invalid GAMA candidate")
+    config=RunConfig(**record["config"])
+    if candidate.get("method")!=config.method or candidate.get("objective_version")!=config.objective_version:
+        raise ValueError("Candidate configuration mismatch")
+    return True
+
+
 def main() -> None:
     operation, path = sys.argv[1:]
     folder = Path(path).resolve()
@@ -189,6 +205,10 @@ def main() -> None:
         elif operation == "complete":
             complete(folder)
             message = "COLLECTION COMPLETE: valid episode; collect all three seeds, then Validate and build calibration."
+        elif operation == "candidate":
+            validate_candidate(folder)
+            print("CANDIDATE VALID",flush=True)
+            return
         elif operation == "model":
             from .headless import load_model
 

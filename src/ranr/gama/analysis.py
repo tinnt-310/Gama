@@ -9,6 +9,7 @@ import numpy as np
 from ..paths import write_json, digest
 from .headless import METHODS, RunConfig, provenance, load_model
 from .pipeline import jobs, report
+from .contracts import rescore_components
 
 
 def sensitivity(config: RunConfig, folder: Path, models: Path, workers: int) -> None:
@@ -56,17 +57,9 @@ def sensitivity(config: RunConfig, folder: Path, models: Path, workers: int) -> 
                 for x in json.loads((source / "outcomes.json").read_text())
                 if x["measured"]
             ]
-            waiting = np.array([x["waiting_min"] for x in outcomes])
-            travel = np.array([x["travel_min"] for x in outcomes])
-            penalty = np.array([x["penalty_min"] for x in outcomes])
             for factor in identity["penalty_factors"]:
-                w_star = (waiting + factor * penalty) / deadline
-                objective = float(
-                    0.5 * np.mean(travel / deadline + w_star)
-                    + 0.3 * np.percentile(w_star, 95)
-                    + 0.2 * row["peak_queue"] / 125
-                )
-                if factor == 1 and abs(objective - row["objective"]) > 1e-8:
+                objective = rescore_components(row["objective_components"], factor, factor)
+                if factor == 1 and abs(objective - row["objective"]) > 1e-6:
                     raise ValueError(
                         "Sensitivity re-scoring differs from GAMA objective"
                     )

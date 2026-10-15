@@ -1,109 +1,100 @@
-# Toàn bộ cài đặt GAMA hiện hành
+# Cài đặt GAMA hiện hành
 
-Môi trường **persistent-controlled-v2**, ngày 15/10/2026: **một mô hình vật lý, một cơ chế controlled opportunities, bốn phương pháp**. GAMA GUI và Headless chạy cùng GAML. Bản cài đặt cũ đã lưu trong source_before.tar.gz; bảng này thay thế hướng dẫn trước refactor.
+Môi trường `persistent-controlled-distributed-3`. Run me có **49 điều khiển**. Collect training data kế thừa giao diện và thêm seed/collection flag; cấu hình thu được nạp từ profile đăng ký trước khi khởi tạo.
 
-Nguồn chuẩn: [environment.json](../configs/gama/environment.json), [main.gaml](../models/main.gaml), [RunConfig](../src/ranr/gama/headless.py). Có **36 điều khiển Run me**, thêm hai điều khiển trong Collect training data. Không có lựa chọn workload hay sạc tại nhà trong GUI nghiên cứu.
+Nguồn: [main.gaml](../models/main.gaml), [environment.json](../configs/gama/environment.json), [RunConfig](../src/ranr/gama/headless.py). Thiết lập trước khi khởi tạo; thay tham số nghiên cứu giữa episode bị từ chối.
 
-## Các điều khiển Run me
-
-Đặt cấu hình trước khi khởi tạo. Thay fleet, tần suất, SOC, step, tốc độ hoặc vật lý giữa episode bị từ chối; cần đóng và khởi tạo lại.
-
-| Tên GUI / biến | Mặc định | Ý nghĩa |
-|---|---|---|
-| Auto GUI preview when no trained model (restart required)<br>`ranr_gui_preview` | true | Cho phép development weights và nhãn UNTRAINED khi thiếu model; không đổi vật lý, demand, samples hoặc giờ. |
-| Method (restart required)<br>`ranr_method` | RANR-AW | RANR-AW / No-P2P / No-Prediction / Fixed-Weights. |
-| Scenario (restart required)<br>`ranr_case` | normal | normal / high / burst / low_compliance / delayed / combined. |
-| GAMA trained parameter file<br>`ranr_parameter_file` | Rỗng | Model GAMA v2; sai môi trường hoặc cấu hình bị từ chối. Tự tìm published model nếu có. |
-| Train calibration file<br>`ranr_calibration_file` | Rỗng | Calibration train v2. GUI sau training lấy đường dẫn đã khóa trong model. |
-| Development mode (untrained)<br>`ranr_development` | false → true nếu auto preview thiếu model | Trọng số/prior development; không gọi là kết quả đã huấn luyện. |
-| Run ID<br>`ranr_run_id` | gui | Định danh; mặc định sinh tên riêng. Không chọn mô hình vật lý qua tên. |
-| Output directory<br>`ranr_output` | ../outputs/gama_ranr/gui | Không dùng chung thư mục cho các lượt chạy. Với Run ID gui, tự tạo thư mục con. |
-| Warmup minutes<br>`ranr_warmup` | 360 phút | Thời gian khởi động trước cửa sổ đo. |
-| Measurement minutes<br>`ranr_measure` | 360 phút | Cửa sổ cơ hội/yêu cầu đo chính. |
-| Deadline minutes<br>`ranr_deadline` | 360 phút | Deadline từng nhu cầu đã kích hoạt; tiếp tục settlement sau cửa sổ đo. |
-| EV nominal speed (km/h)<br>`ranr_ev_speed` | 30 km/h | Tốc độ danh định EV; native driving còn chịu giao thông. |
-| Background nominal speed (km/h)<br>`ranr_car_speed` | 50 km/h | Tốc độ danh định ô tô thường. |
-| Monte Carlo samples<br>`ranr_samples` | 32 | Số scenario predictor, không tự giảm khi preview. Research cần accuracy gate. |
-| Private EV opportunities/day<br>`ranr_private_frequency` | 0,2 cơ hội/xe/ngày | Cơ hội theo loại xe và bảng giờ; không đảm bảo mọi cơ hội kích hoạt. |
-| Taxi opportunities/day<br>`ranr_taxi_frequency` | 0,8 cơ hội/xe/ngày | Như trên, áp dụng taxi. |
-| Public charging SOC threshold (%)<br>`ranr_soc_threshold` | 30% | Chỉ SOC thấp hơn ngưỡng mới đủ điều kiện; SOC đúng 30% bị bỏ qua. |
-| True compliance (environment only)<br>`ranr_true_compliance` | 0,8 | K_true của môi trường; policy không đọc giá trị này. |
-| Outside/deferred probability<br>`ranr_true_defer` | 0,05 | Xác suất outside/defer; terminal demand được phạt, xe vẫn tồn tại. |
-| Mean P2P delay (minutes)<br>`ranr_delay` | 0,5 phút | Mean delay packet; delayed/combined đặt 5 phút. |
-| Packet loss<br>`ranr_loss` | 0 | Xác suất mất packet; combined đặt 0,1. |
-| Burst requests<br>`ranr_burst_size` | 100 | Có thể nhập 20/50/100/200 hoặc số nguyên không âm. Không đủ xe/eligibility thì báo thiếu hụt. |
-| Render displays<br>`ranr_render` | true | Computer, biểu đồ và monitor. Headless thường tắt. |
-| Record full trace<br>`ranr_trace` | true | Trace đầy đủ, ghi theo buffer. |
-| Calibration collection<br>`ranr_calibrating` | false | Thu calibration và dùng hành vi chọn trạm nền. Thu chính thức qua Collect training data để có registration. |
-| Target SOC (%)<br>`target_soc` | 80% | Mức pin đích; năng lượng yêu cầu chốt tại activation, không sửa giữa phiên. |
-| Start hour (restart required)<br>`initial_hour` | 0 (00:00) | Giờ đồng hồ lúc bắt đầu; khác thời gian đã trôi qua. |
-| Seconds per cycle (1 detailed / 60 fast / 3600 coarse)<br>`step` | 1 giây | 1/5/10/30/60/3600 trên GUI; nghiên cứu giữ 1 giây đến khi có kiểm chứng sai số. |
-| Vehicle icon size (px)<br>`vehicle_icon_size_px` | 40 px | 16–80 px; chỉ đổi hiển thị. |
-| Cars (restart required)<br>`cars` | 3000 | Ô tô thường cơ bản, cần restart; không tạo/xóa qua callback khi chạy. |
-| Private EVs (restart required)<br>`privates` | 1000 | EV cá nhân cơ bản, cần restart. |
-| Electric taxis (restart required)<br>`taxis` | 700 | Taxi điện cơ bản, cần restart. elecars = privates+taxis là giá trị suy ra. |
-| EV consumption (kWh/km)<br>`consumption_kwh_km` | 0,18 kWh/km | Tiêu hao theo quãng đường native driving thực. |
-| Charging efficiency<br>`charge_efficiency` | 0,9 | Hiệu suất từ điện lưới vào pin. |
-| Rush Activity<br>`have_rush` | true | Bật lịch xe nhập từ ngoài; độc lập với cơ hội sạc. |
-| Extra vehicles per type during rush (%)<br>`rush_extra_percent` | 30% | 0–30%; hạn mức xe bổ sung đang hiện diện, tính riêng từng loại. |
-
-## Thu calibration trực tiếp trong GAMA
-
-Chọn **Collect training data**. `ranr_collection_seed`: 800001 / 800002 / 800003; `ranr_collect_gui`: true. Experiment nạp profile [calibration.json](../configs/gama/calibration.json) trước khởi tạo để giữ cấu hình đồng nhất. Chạy từng seed hết episode, rồi bấm **Validate and build calibration** trong Commands. Monitor Calibration status và bridge_status.json báo kết quả. Xem [hướng dẫn từng bước](GAMA_RANR_RUN_GUIDE_VI.md).
-
-Run me có thể ghi raw calibration nếu bật checkbox, nhưng lượt khám phá này không tự thay thế ba seed collection đã đăng ký. Build chỉ nhận các lượt hoàn chỉnh, đúng nguồn/cấu hình và đủ mẫu; không tự bắt đầu CMA-ES.
-
-## Fleet và giao thông
-
-| Nhóm | Xe cơ bản | Extra tối đa 30% | Tổng khi đủ hạn mức |
-|---|---:|---:|---:|
-| Ô tô thường | 3000 | 900 | 3900 |
-| EV cá nhân | 1000 | 300 | 1300 |
-| Taxi điện | 700 | 210 | 910 |
-| Tổng | 4700 | 1410 | 6110 |
-
-Xe đỗ, di chuyển, chờ, sạc và stranded đều còn trong thành phố. Nhu cầu sạc không tạo xe; hoàn thành không xóa xe cơ bản. Xe hết pin không tự hồi pin. Cao điểm 05:30–07:30 và 17:00–20:00; xe nhập dần tại cửa ngõ đã kiểm chứng tuyến, đỗ tại các điểm đích trung tâm, rồi đi ra cửa ngõ khi đủ điều kiện. Xe lưu lại chiếm hạn mức của đợt sau.
-
-Cửa ngõ/vùng trung tâm là dữ liệu dẫn xuất từ mạng đường và cụm trạm; không phải ranh giới hành chính được hiệu chỉnh thực địa. gateway_validation.json ghi giả định, vị trí và tuyến. GIS gốc được bảo toàn.
-
-## Controlled opportunities và sáu scenario
-
-Bảng 24 giờ riêng cho private/taxi nằm trong environment.json, được chuẩn hóa tổng ngày khi lấy mẫu. Tần suất và bảng giờ là giả định development. Tổng cơ bản kỳ vọng 760 **cơ hội**/ngày = 760/1440 phút, khoảng 0,528/phút; 760 **yêu cầu**/ngày là mục tiêu calibration cần đo thực tế. Không có ô rate độc lập để tạo cấu hình mâu thuẫn.
-
-Mỗi cơ hội gắn ID xe và xét một lần: SOC <30%, xe hiện diện, không stranded/đang ra khỏi thành phố và không có phiên đang xử lý. Năng lượng mục tiêu = dung lượng pin × (80% − SOC hiện tại). Không gán SOC mới hoặc đổi sang xe khác để đạt số lượng.
-
-| Scenario | Tác động |
-|---|---|
-| normal | Tần suất/bảng giờ cơ bản |
-| high | Tần suất cơ hội ×1,8; không tạo thêm EV ngoài traffic plan |
-| burst | Thêm cơ hội đồng thời tại phút 60/120 sau đầu cửa sổ đo, lặp theo ngày; các ID khác nhau trong mỗi burst |
-| low_compliance | K_true=0,2 |
-| delayed | Mean delay=5 phút |
-| combined | Burst + K_true=0,2 + delay=5 phút + loss=0,1; không tự nhân rate ×1,8 |
-
-Burst ghi số cơ hội yêu cầu, activation và thiếu hụt khi không đủ xe/eligibility. Manifest cơ hội/lịch giao thông/SOC ban đầu giống nhau giữa phương pháp cùng seed. Activation và quỹ đạo được phép khác do trạng thái nội sinh; báo cáo cả số cơ hội lẫn nhu cầu thực.
-
-## Bốn phương pháp
-
-| Phương pháp | P2P | Waiting | Trọng số |
+| Điều khiển | Biến | Mặc định | Lựa chọn/giới hạn |
 |---|---|---|---|
-| RANR-AW | Có | Tại ETA, ngoại tác ghép cặp | Adaptive, 20 tham số |
-| No-P2P | Không | Tại ETA, prior train cho trạm xa | Adaptive, 20 |
-| No-Prediction | Có | Snapshot, H=0 theo FIFO | Adaptive, 20 |
-| Fixed-Weights | Có | Như Proposed | Fixed, 4 |
+| Auto GUI preview when no trained model (restart required) | `ranr_gui_preview` | true | <- true |
+| Method (restart required) | `ranr_method` | ranr-aw | among:["RANR-AW","No-P2P","No-Prediction","Fixed-Weights"] |
+| Scenario (restart required) | `ranr_case` | normal | among:["normal","high","burst","low_compliance","delayed","combined"] |
+| GAMA trained parameter file | `ranr_parameter_file` | rỗng | nhập giá trị |
+| Train calibration file | `ranr_calibration_file` | rỗng | nhập giá trị |
+| Development mode (untrained) | `ranr_development` | false | nhập giá trị |
+| Run ID | `ranr_run_id` | gui | nhập giá trị |
+| Output directory | `ranr_output` | ../outputs/gama_ranr/gui | nhập giá trị |
+| Warmup minutes | `ranr_warmup` | 360 | nhập giá trị |
+| Measurement minutes | `ranr_measure` | 360 | nhập giá trị |
+| Deadline minutes | `ranr_deadline` | 360 | nhập giá trị |
+| EV nominal speed (km/h) | `ranr_ev_speed` | 30 | nhập giá trị |
+| Background nominal speed (km/h) | `ranr_car_speed` | 50 | nhập giá trị |
+| Monte Carlo samples | `ranr_samples` | 32 | nhập giá trị |
+| Private EV opportunities/day | `ranr_private_frequency` | 0.2 | min:0.0 |
+| Taxi opportunities/day | `ranr_taxi_frequency` | 0.8 | min:0.0 |
+| Public charging SOC threshold (%) | `ranr_soc_threshold` | 30.0 | min:0.0 max:100.0 |
+| True compliance (environment only) | `ranr_true_compliance` | 0.8 | nhập giá trị |
+| Outside/deferred probability | `ranr_true_defer` | 0.05 | nhập giá trị |
+| Mean P2P delay (minutes) | `ranr_delay` | 0.5 | nhập giá trị |
+| Packet loss | `ranr_loss` | 0.0 | nhập giá trị |
+| Burst requests | `ranr_burst_size` | 100 | nhập giá trị |
+| Render displays | `ranr_render` | true | nhập giá trị |
+| Record full trace | `ranr_trace` | true | nhập giá trị |
+| Calibration collection | `ranr_calibrating` | false | nhập giá trị |
+| Recommendation temperature (restart required) | `ranr_temperature` | 0.2 | nhập giá trị |
+| P2P heartbeat minutes (restart required) | `ranr_broadcast_period` | 5.0 | nhập giá trị |
+| Minimum P2P interval minutes (restart required) | `ranr_min_send` | 0.16666666666666666 | nhập giá trị |
+| Duplicate packet probability (restart required) | `ranr_duplicate_probability` | 0 | nhập giá trị |
+| Partition begin minutes (-1 disabled) (restart required) | `ranr_partition_begin` | -1 | nhập giá trị |
+| Partition end minutes (-1 disabled) (restart required) | `ranr_partition_end` | -1 | nhập giá trị |
+| Driver behavior (restart required) | `ranr_behavior_case` | moderate | among:["high","moderate","low","contextual","misspecified"] |
+| Forecast stabilization (restart required) | `ranr_stabilization` | off | among:["off","smoothing","smoothing_hysteresis"] |
+| Failure coefficient (development) (restart required) | `ranr_failure_beta` | 1.0 | nhập giá trị |
+| Unmet energy coefficient (development) (restart required) | `ranr_energy_beta` | 1.0 | nhập giá trị |
+| Station event JSON file (restart required) | `ranr_station_events_file` | rỗng | nhập giá trị |
+| Decline probability (restart required) | `ranr_true_decline` | 0.0 | min:0.0 max:1.0 |
+| Queue abandonment minutes (-1 disabled) | `ranr_abandon_after` | -1.0 | nhập giá trị |
+| Target SOC (%) | `target_soc` | 80.0 | min: 1.0 max: 100.0 |
+| Start hour (restart required) | `initial_hour` | 0 | min: 0.0 max: 23.0 |
+| Seconds per cycle (1 detailed / 60 fast / 3600 coarse) | `step` | 1 | <- 1.0 among: [1.0,5.0,10.0,30.0,60.0,3600.0] |
+| Vehicle icon size (px) | `vehicle_icon_size_px` | 40 | min: 16.0 max: 80.0 slider: true |
+| Cars (restart required) | `cars` | 3000 | min:0 max:5000 |
+| Private EVs (restart required) | `privates` | 1000 | min:0 max:5000 |
+| Electric taxis (restart required) | `taxis` | 700 | min:0 max:5000 |
+| EV consumption (kWh/km) | `consumption_kwh_km` | 0.18 | min: 0.0 max: 1.0 |
+| Charging efficiency | `charge_efficiency` | 0.9 | min: 0.01 max: 1.0 |
+| Rush Activity | `have_rush` | true | nhập giá trị |
+| Extra vehicles per type during rush (%) | `rush_extra_percent` | 30 | min: 0.0 max: 30.0 |
 
-Cùng năm tiêu chí [T, W_mean, W_P95, H, U], cùng physics và policy interfaces. No-Prediction không gọi future predictor. No-P2P không phát/nhận thông điệp giữa trạm.
+## Một môi trường và bốn phương pháp
 
-## Profile, thời gian và dữ liệu
+| Nhóm | Giá trị |
+|---|---|
+| Fleet cơ bản | 3000 car +1000 private EV +700 taxi =4700 |
+| Inbound đang hiện diện tối đa | 900/300/210 =1410; tổng6110 |
+| Cửa sổ nhập thành phố | 05:30–07:30;17:00–20:00 |
+| Cơ hội sạc | 0.2/private/day;0.8/taxi/day;760/day trước eligibility |
+| Eligibility | SOC<30%, không stranded/departing/busy |
+| Charging | public-only, target80%, pin60kWh |
+| Infrastructure | 11 trạm,125 cổng,7195kW danh định |
+| Reserve | 5% dung lượng pin cho travel feasibility |
+| Forecast horizon / TTL | 120/180 phút |
+| Smoothing / hysteresis | off; chỉ bật cho thí nghiệm development |
+| Thời gian episode mặc định | 360 warmup +360 measure +360 settlement phút |
 
-| Profile | Warmup / đo / deadline (phút) | Fleet cơ bản | Samples | Start hour |
-|---|---|---|---:|---:|
-| Run me / research | 360 / 360 / 360 | 3000 / 1000 / 700 | 32 trước accuracy gate | 0 |
-| Calibration | 360 / 360 / 360 | 3000 / 1000 / 700 | 4 | 0 |
-| Smoke CLI | 0 / 3 / 30 | 2 / 3 / 2 | 4 | 6 |
+| Method | P2P | Queue estimator | Weights |
+|---|---|---|---|
+| RANR-AW | Có | ETA + paired externality | 20 tham số |
+| No-P2P | Không | Local/prior train, ETA | 20 |
+| No-Prediction | Có | Snapshot, H=0 | 20 |
+| Fixed-Weights | Có | ETA + paired externality | 4 |
 
-Timeout research 21.600 giây thực/run, calibration 28.800, smoke 180. 18 giờ mô phỏng không đồng nghĩa 18 giờ thực. Muốn đo 12 giờ, đặt Measurement minutes=720; giữ warmup/deadline 360/360 thì tổng tối đa 24 giờ mô phỏng.
+Cả bốn có5 criteria và cùng vật lý. Peer offline/stale không tự chứng minh trạm hỏng; prior và uncertainty thay thế thông tin đã hết hạn. Connector generic-public là giả định nghiên cứu chưa khảo sát.
 
-Outputs tách theo run, có input/provenance, initial_fleet.json, opportunities.json, traffic_plan.json, opportunity_results.csv, traffic.csv, vehicles.csv, snapshots, outcomes/metrics/completion. Các file tổng kết chỉ hợp lệ khi chạy hết. Seed GUI thông thường 42; seed calibration được chọn riêng. Trong CLI, tham số tương ứng là background_cars/private_evs/electric_taxis/private_frequency/taxi_frequency; demand_rate là property suy ra, không nhận từ JSON.
+## Scenario và hành vi
 
-GAMA model schema gama-ranr-v2 và environment_version phải khớp. Calibration source/hash, model source và cấu hình khóa được kiểm tra; artifact cũ cần recalibration/retraining. Giữ nguyên GIS 11 trạm, 125 cổng, 7.195 kW; pin 60 kWh, chỉ sạc công cộng. Training chính vẫn chờ development dài, correctness/accuracy gate và benchmark; chưa chạy trong đợt refactor.
+Sáu scenario: normal; high nhân opportunity frequency1.8; burst thêm cơ hội tại phút60/120; low_compliance đặt true compliance0.2; delayed đặt delay5phút; combined=burst+low compliance+delay5+loss0.1. Không tạo EV theo tăng demand. Burst20/50/100/200 chọn EV khác nhau, ghi shortage thay vì bù xe.
+
+Driver behavior high/moderate/low/contextual/misspecified là tham số development, không thêm phương pháp chính. Scenario low_compliance/combined ưu tiên compliance0.2. K_true không truyền vào policy; K_hat đến từ train calibration. Decline mặc định0, queue abandonment mặc định-1 (tắt).
+
+Event-triggered updates và heartbeat dùng chung transport; minimum interval10giây, threshold queue-workload5phút hoặc5 exposure tokens, capacity/state change đánh dấu critical. Packet cùng tick không được nhìn thấy tại peer. No-P2P luôn0 thông điệp CS–CS.
+
+Station event JSON là danh sách `{at,sid,operational,factor,failed_ports}`; `at` tính phút elapsed, `sid` theo thứ tự tên trạm, factor trong[0,1], failed_ports là ID cổng cục bộ, danh sách rỗng khôi phục. Sự cố chỉ trở thành thông tin policy sau quan sát/giao packet.
+
+## Thu dữ liệu và research gates
+
+Chọn Collect training data → seed800001/2/3 → Play đến completion → Validate and build calibration. Mỗi run có thư mục và hashes riêng. Bộ seed chưa đủ mẫu sẽ bị từ chối; không ép SOC để tạo eligibility.
+
+GUI mặc định seed42. GUI/Headless dùng cùng GAML; so sánh kết quả phải cùng seed, config và tham số. Preview chỉ bật development/render khi thiếu model, không đổi fleet, clock hoặc samples. Auto preview không phải model đã học.
+
+Training cần calibration mới, correctness, long development, benchmark/accuracy, objective sensitivity và design freeze. CMA-ES population16,3 optimizer seeds; ngân sách chính+validation tối đa72h. Final held-out evaluation720 runs chưa tự chạy. Xem [run guide](GAMA_RANR_RUN_GUIDE_VI.md) và [thay đổi khoa học](GAMA_RANR_SCIENTIFIC_CHANGES_VI.md).

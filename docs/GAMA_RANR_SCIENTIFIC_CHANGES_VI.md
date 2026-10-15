@@ -1,39 +1,56 @@
-# Hồ sơ thay đổi khoa học — persistent-controlled-v2
+# Hồ sơ thay đổi khoa học RANR-AW
 
-Ngày 15/10/2026. Nguồn/tài liệu trước refactor được giữ trong `outputs/gama_ranr/unified_fleet_v2_20261015/source_before.tar.gz`, kèm SHA-256. Dữ liệu GIS và kết quả lịch sử không được chuyển thành bằng chứng cho môi trường mới.
+Phiên bản môi trường `persistent-controlled-distributed-3`; observation `station-observation-3`, packet `peer-packet-3`, objective `opportunity-service-3`, model `gama-ranr-v3`, calibration `gama-calibration-v3`. Đây là thay đổi tại chỗ; checkpoint `5800181` bảo toàn công thức và triển khai trước.
 
-| Vấn đề / công thức trước | Quyết định hiện tại | Giả định, ảnh hưởng và kiểm chứng |
-|---|---|---|
-| GUI và Headless chọn hai cơ chế fleet khác nhau qua cấu hình hoặc Run ID | Một vòng đời xe và một controlled opportunity mechanism | Run ID chỉ định danh output; kiểm tra cùng manifest và fixture bốn phương pháp |
-| Fleet GUI 3000/594/1138; controlled không có EV cơ bản | Fleet 3000/1000/700, tổng 4700, tồn tại cả khi đỗ/sạc | Cấu hình nghiên cứu tạm thời; startup GAMA kiểm tra số thực tế |
-| Request tạo private_ev; terminal demand xóa EV | Cơ hội gắn ID có sẵn; terminal giải phóng phiên, giữ agent | Không tạo xe theo request, kể cả burst; fixture duplicate opportunity và persistent count |
-| SOC khởi tạo suy từ năng lượng demand | SOC ban đầu keyed uniform [40,100]; giảm theo quãng đường, tăng từ năng lượng trạm | Không đặt lại pin khi activation; log lifetime distance/charging energy để kiểm tra bảo toàn |
-| Xe hết pin bị xóa | Giữ stranded, không tự hồi pin, không nhận cơ hội tiếp | Không loại xe khó khỏi population; báo stranded và thiếu năng lượng riêng |
-| Sạc tại nhà song song với request SOC | Chỉ sạc công cộng trong mô hình nghiên cứu | Phạm vi điều phối 11 trạm; nhánh reference lịch sử không được kích hoạt từ GUI nghiên cứu |
-| Tốc độ demand từ tải danh định: 0,6×7195×0,9/(60×20)=3,23775/phút | Tần suất cơ hội 0,2/private/ngày và 0,8/taxi/ngày; tổng 760/1440/phút | 760 yêu cầu/ngày là mục tiêu calibration, số thực còn chịu eligibility. Không tự tăng demand để đạt mục tiêu |
-| Arrivals cơ bản đồng nhất theo giờ | NHPP theo bảng 24 giờ riêng từng loại; bảng được chuẩn hóa khi lấy mẫu | Bảng dựa khoảng hoạt động của mô hình, chưa hiệu chỉnh thực địa; lưu trong environment.json |
-| SOC <30 tự phát sinh yêu cầu ngoài lịch | Chỉ xét cơ hội đã lên lịch; SOC <30 là một điều kiện bắt buộc | SOC đúng 30 không kích hoạt; không chồng phiên, không đổi ID để bù |
-| Rush tắt trong controlled; cohort sinh cùng lúc trong thành phố | Traffic plan độc lập demand, nhập dần qua cửa ngõ cả trong settlement | Cap đang hiện diện 900/300/210; giữ xe chưa rời từ đợt trước |
-| Hết rush xóa ngay xe không đang sạc | Hoàn thành hành trình/phiên hiện tại, chờ tới giờ dự kiến rồi chạy ra exit | Chỉ xóa xe vãng lai tại exit; stranded có thể lưu lại và chiếm cap |
-| Burst tạo EV theo số request | Burst cơ hội trên các ID khác nhau có mặt theo kế hoạch, activation qua eligibility | Ghi thiếu hụt nếu absent/busy/SOC chưa thấp/đang ra; không tạo EV hoặc ép pin |
-| Common random numbers theo manifest request đã tạo | Manifest cơ hội, initial fleet và traffic plan cùng seed giữa các phương pháp | Activation là nội sinh, có thể khác. Báo opportunity count, activation, unmet/served và objective cùng nhau |
-| Checkbox GUI chỉ ghi raw calibration | Experiment collection đăng ký source/config từ đầu, bridge kiểm chứng và tổng hợp | Ba seed train tách biệt development/test; thiếu mẫu/seed/completion hoặc sai hash bị từ chối |
-| Model/calibration schema cũ | Schema v2 + environment version + source/config/artifact hashes | Cần thu lại calibration và retrain; không sửa provenance artifact lịch sử |
+| Thành phần | Trước / vấn đề | Quyết định hiện hành / giả định | Bằng chứng cần đọc |
+|---|---|---|---|
+| Physical model | Hai hệ thuật toán cùng import, nhiều công tắc legacy | Một fleet 3000 car +1000 private EV +700 taxi; opportunities hiện hữu; inbound tối đa 900/300/210 | Fleet, physical, burst fixtures; development dài còn chờ |
+| Observation | Local/peer dùng snapshot có cùng độ rộng cố định | Local chính xác của chính trạm; packet sao chép timestamp/version; độ chính xác peer công bố như nhau giữa phương pháp | Protocol, decision và network fixtures |
+| Exposure | Cohort theo bucket, thiếu feedback/acknowledgement | Mỗi cohort một token request-leg, count=1; version, context, bucket, ETA, energy, expiry; resolution có nguồn | Retry, cancellation, expiry; chưa khẳng định độ chính xác ngoài thực nghiệm |
+| Reconciliation | Survival ETA đơn thuần | Arrival trình token được ghép theo giao thức; arrival không token dùng Bayes với mô hình other arrivals Poisson | Pure posterior tests; xấp xỉ mean-field cần development validation |
+| Arrivals dự báo | Background và unseen có khoảng issuance chồng nhau | Exposure đã biết; unseen issuance trong khoảng thiếu tin trước t; background issuance sau t | Scenario fixtures, audit khoảng thời gian |
+| Cost T | Travel đơn thuần | Travel + expected charging duration, không cộng waiting | Decision fixture với cổng 60/120 kW |
+| Feasibility | Tuyến và 3 kWh hard-code | GIS route, energy +5% battery reserve, connector, operating/capacity đã biết | Decision và physical fixtures |
+| No-Prediction | Snapshot estimator giữ 5 criteria | Giữ nguyên 5 logits; H=0 theo FIFO và independent ports; không thêm arrivals/tiến ETA | Scientific fixture; future_calls=0 |
+| Behavior | 20% bypass hard-code, calibration không có offers | Mọi activation có offer; EV tự chọn. Calibration thăm dò xác suất đã đăng ký; K_hat từ observable response classes | Protocol, collection unit tests; dữ liệu thực dài còn thiếu |
+| P2P | Periodic + phát sau mọi offer | Heartbeat + event triggers cùng transport; batching/min interval, duplicate/reorder/partition/recovery | Network fixture; overhead logs |
+| Stability | Chưa có experiment có kiểm soát | Off mặc định; forecast-only smoothing/hysteresis, invalidation khi critical/expired/escalation | Decision fixture; hiệu quả vận hành chưa đo |
+| Outcome | Failed/deferred/unserved gộp | Terminal loại trừ nhau; ineligible no-need tách khỏi failure; ledger opportunity đầy đủ | Objective/contract fixtures |
+| Objective | T*/W* với D(I+u), không có charging duration | Công thức phân rã dưới đây; bỏ phạt gộp cũ | Objective fixture và analysis checks |
+| Training | Chỉ gate benchmark/physical | Thêm design freeze, objective sensitivity và distributed evidence; tối đa72h gồm design-validation allowance | Orchestration tests; chưa training |
 
-## Những hợp đồng được giữ
+## Công thức cost và weights
 
-Bốn phương pháp cùng physics, FIFO, giới hạn EV/port, native driving, snapshot observation và packet đã giao. Python không mô phỏng xe/hàng đợi để thay kết quả GAMA.
+`f=[T_travel+T_charge, W_mean, W_P95, H, U]`. Mốc phút cố định `[60,60,120,120,60]`; normalized features được giới hạn [0,5], H trong [-5,5] để giữ ngoại tác có dấu. Cost là dot product weights với normalized features, không phải completion time.
 
-Vector chi phí vẫn `[T,W_mean,W_P95,H,U]`. No-Prediction lấy phân phối tại snapshot, không tiến tới ETA, không sinh future arrivals. Với probe cuối FIFO, ngoại tác lên các xe có sẵn H=0; giữ đủ năm trọng số. `w_H` vẫn ảnh hưởng độ phân tán khuyến nghị qua softmax. Snapshot uncertainty chỉ dùng reconstruction từ train/development; snapshot chính xác có thể cho phân phối suy biến. Các phương pháp prediction giữ ngoại tác ghép cặp, loại waiting của probe.
+`phi=[1, observable_load, recent_request_intensity, exposure_response_uncertainty, information_age]`, từng feature không-bias trong [0,1]. Bốn hàng Theta độc lập, hàng thứ năm zero:20 tham số; Fixed-Weights4 logits, logit cuối zero. Với No-Prediction, w_H vẫn ảnh hưởng tổng mass dành cho các tiêu chí khác và entropy, dù w_H×H=0.
 
-P2P/exposure tiếp tục dùng packet đã nhận, version replacement và TTL. No-P2P phát/nhận 0 packet giữa trạm; prior chỉ từ train. K_true và K_hat tách biệt. Policy không đọc manifest cơ hội hoặc trạng thái thật trạm xa. Các stream được khóa theo ID xe/sự kiện, không theo thứ tự gọi.
+Softmax dùng trừ max-logit, `P(r)∝a(r) exp(-E_Khat[C|offer r]/tau)`. Prior `a(r)=published_power/(1+travel/30)` dương trên candidate khả thi; mặc định tau0.2. Uncertainty phụ thuộc spread từng candidate và tuổi nguồn. No-P2P chỉ dùng local và prior train cho peer.
 
-Deadline D=360 phút mặc định; với tỷ lệ năng lượng thiếu u và chỉ báo chưa hoàn thành I: `P=D(I+u)`, `W*=waiting/deferral+P`, `T*=travel+W*`. Objective chung: `0,5 mean(T*/D)+0,3 P95(W*/D)+0,2 peak_queue/installed_ports`. Nhu cầu đã kích hoạt có terminal outcome một lần. Cơ hội không kích hoạt được báo riêng, không giả thành request đã chờ. Run không có demand trả metrics hữu hạn và nhãn empty_demand_run; candidate research không được lấy run rỗng làm fitness tốt.
+## Reconciliation và giới hạn thông tin
 
-CMA-ES vẫn population 16, ba optimizer seed, ngân sách chung theo benchmark và tối đa 72 giờ training/validation chính; checkpoint và chọn model bằng long validation. Thêm gate development dài của môi trường mới trước training. Không đổi tiêu chuẩn accuracy để vừa máy. Test chính chưa được mở để tuning.
+EV cung cấp token khi đến trạm; đây là thông tin giao thức, không dùng hidden vehicle ID để truy tìm lựa chọn thật. Peer chỉ biết resolution sau modeled delivery. Resolution nhận sau thời điểm snapshot cũ được replay như arrival đã quan sát, không biến thành future ground truth.
 
-## Giới hạn GIS và bằng chứng
+Với arrival không token, giả định `B~Bernoulli(p)`, `O~Poisson(lambda)`, `A=B+O`. Khi A=n: `P(B=1|A=n)=p*n/(p*n+(1-p)*lambda)`; A=0 cho0. Chỉ cohort không có token/được khai báo anonymous mới dùng phép cập nhật này; cohort có token được đối soát qua resolution. ETA samples điều kiện hóa theo việc rơi trong/ngoài observation window. Mô hình Poisson cho phần không liên kết là xấp xỉ mean-field; không tuyên bố đối soát định danh hoàn hảo. Đây là mục cần kiểm chứng accuracy gate, không phải bằng chứng từ smoke.
 
-Cửa ngõ là bốn cực ngoài lõi của mạng đường có tuyến hai chiều tới các building trung tâm; tối đa 16 điểm đích được kiểm chứng. Đây là ranh giới nghiên cứu tạm thời, không phải cửa ngõ hành chính đã khảo sát. gateway_validation.json và manifest nguồn ghi provenance, tọa độ và khoảng cách tuyến. Không thêm cạnh giả hoặc sửa GIS gốc.
+D_background gồm issuance tương lai chưa phát sinh; D_unseen gồm issuance quá khứ sau watermark chưa nhận; D_exposure gồm offer đã nhận còn outstanding. Một exposure sample chỉ chọn một đích hoặc outside. Không đọc opportunity manifest trong predictor.
 
-Native driving là mô hình giao thông GAMA, chưa hiệu chỉnh để tuyên bố tái tạo giao thông thực Nha Trang. Kiểm thử cưỡng bức trạng thái pin/vị trí trong fixture chỉ dùng xác nhận invariant; không nhập vào calibration nghiên cứu. Smoke ngắn và unit fixtures không chứng minh tần suất sạc/ngày hoặc mức nghẽn 125 cổng. Các kết luận đó chờ development dài và benchmark thực.
+## Objective chính thức và development coefficients
+
+`L = .5*sum(service_time)/(N_opp*D) + .3*P95(wait)/D + .2*peak_station_queue/125 + beta*sum(N_failure)/N_opp + beta_E*unmet_kWh/requested_kWh`.
+
+Service time = travel + waiting + charging elapsed; hoàn thành bằng completion time vật lý, terminal chưa hoàn thành dùng phần thời gian đã phát sinh. Outage pause trong charging được tính vào elapsed; active charging/energy vẫn theo công suất vật lý. Mean và P95 waiting conditional trên activated/completed được báo riêng. Queue peak chỉ đo trong cửa sổ chính; outcomes tiếp tục settle tới deadline.
+
+N_opp là manifest opportunity trong cửa sổ đo, không phụ thuộc policy. Các terminal failure là no_feasible_station, voluntary_deferred, declined, abandoned, deadline_missed và stranded. Mỗi request chỉ một terminal. Stranded trước activation được ghi tại opportunity mà không tạo request giả. No-need/busy/absent/departing là ineligibility, không tự tính thành thất bại dịch vụ.
+
+Mặc định development beta=beta_E=1. Hai phần failure và energy thể hiện hai ưu tiên khác nhau, không cộng D(I+u) lần nữa. Phân tích0.5/1/2 và review tỷ trọng phải hoàn tất trước freeze; chưa được coi đây là hệ số đã validation. Không có request: conditional waiting/energy ratio0; không có opportunity: fitness_invalid. Dừng sớm là incomplete/censored, không được nhận làm fitness.
+
+## Giả định và phần chưa được xác nhận
+
+Tần suất0.2/0.8 cơ hội/EV/ngày cho760 cơ hội cơ bản, không ép760 activations. SOC<30, target80, pin60kWh, public-only; không đổi SOC để đạt quota. Native driving, GIS/gates và hourly profiles là mô hình phát triển, chưa hiệu chỉnh giao thông Nha Trang thực. Connector generic-public là giả định tương thích chưa khảo sát. Mất thông tin không đồng nghĩa station outage; outage chưa nhận có thể gây failure thực tế.
+
+Không diễn giải các khác biệt activation nội sinh là tự động cải thiện. Báo cả opportunity, eligibility, failure, unmet energy, SOC, stranded và thời gian phục vụ. Phần methodology triển khai nằm tại [bản mô tả](manuscripts/METHODOLOGY_IMPLEMENTED_VI.md); PDF lịch sử được giữ nguyên.
+
+ETA calibration dùng tất cả arrival legs quan sát được, không chỉ phiên sạc hoàn tất. Nhu cầu đã chọn đích nhưng không đến trước terminal được thống kê riêng; xác suất đến trước terminal dùng Beta(1,1) train prior. Phân phối ETA điều kiện trên arrival và arrival probability là hai thành phần riêng. Không gán nhãn latent compliance từ arrival tổng hợp.
+
+Stabilization không tác động No-Prediction: baseline này luôn đánh giá snapshot thô đã nhận. Các phương pháp có prediction có thể dùng cùng forecast filter nếu design validation chọn; mặc định mọi phương pháp đều off.

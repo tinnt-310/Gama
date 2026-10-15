@@ -9,6 +9,9 @@ global {
         assert calibration["backend"]="GAMA" and calibration["split"]="train";
         ranr_release_fractions <- calibration["release_fractions"];
         ranr_energy_fractions <- calibration["energy_fractions"];
+        ranr_arrival_probability <- float(calibration["arrival_probability"]);
+        ranr_eta_factors <- calibration["eta_factors"];
+        ranr_response_prior <- calibration["response_prior"];
         ranr_prior_snapshots <- calibration["prior_snapshots"];
         ranr_arrival_prior <- calibration["arrival_prior"];
         ranr_prior_rate <- float(calibration["request_rate"]);
@@ -19,11 +22,11 @@ global {
             ranr_method <- method;
             loop sid from: 0 to: 10 {
                 list<map<string,unknown>> pool <- ranr_prior_snapshots where (int(each["sid"])=sid);
-                loop probe from: 0 to: 2 {
-                    map<string,unknown> snapshot <- ranr_clone_snapshot(pool[int(probe*(length(pool)-1)/2)]);
+                loop probe from: 0 to: 4 {
+                    map<string,unknown> snapshot <- ranr_clone_snapshot(pool[int(probe*(length(pool)-1)/4)]);
                     snapshot["source"] <- method="No-P2P" ? "prior" : "peer";
                     snapshot["issued"] <- 100.0;
-                    if probe=2 {
+                    if probe=2 or probe=4 {
                         list<map<string,unknown>> queue <- copy(list(snapshot["queue"]));
                         loop k from: 1 to: 30 { queue << ["low"::15.0,"high"::25.0,"max_kw"::60.0,"deadline"::360.0]; }
                         snapshot["queue"] <- queue;
@@ -31,6 +34,11 @@ global {
                     map<string,unknown> request <- ["key"::(sid*100+probe),"energy"::20.0,"max_kw"::120.0,"travel"::zero_vector(11)];
                     request["travel"] <- zero_vector(11) collect 20.0;
                     map<string,unknown> observation <- ["at"::(100.0+probe*30.0),"exposure"::[],"watermarks"::zero_vector(11) collect 100.0,"rates"::zero_vector(11) collect ranr_prior_rate];
+                    if probe>=3 and method!="No-Prediction" {
+                        list<map<string,unknown>> cohorts <- [];
+                        loop k from:1 to:(probe=3 ? 100 : 200) { cohorts << ["key"::k,"token"::("probe_"+k),"recommended"::sid,"sender"::sid,"context"::"default","count"::1,"version"::1,"issued"::100.0,"expires"::460.0,"travel"::copy(request["travel"]),"energy"::20.0,"max_kw"::120.0]; }
+                        observation["exposure"] <- cohorts;
+                    }
                     map<string,unknown> estimate <- ranr_estimate(snapshot,observation,request);
                     rows <- rows+method+","+sid+","+probe+","+estimate["mean"]+","+estimate["p95"]+","+estimate["externality"]+","+ranr_queue_calls+"\n";
                 }

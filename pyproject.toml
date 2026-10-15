@@ -4,19 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ranr-research"
-version = "0.2.0"
+version = "0.3.0"
 description = "Reproducible decentralized EV charging recommendation research"
 requires-python = ">=3.10"
 dependencies = ["numpy==2.2.6", "scipy==1.15.3", "cma==4.4.4", "matplotlib==3.10.7"]
-
-[project.optional-dependencies]
-legacy = ["cvxpy==1.7.5", "clarabel==0.11.1", "pyshp==2.3.1", "pyproj==3.7.1"]
 
 [project.scripts]
 ranr = "ranr.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"ranr.legacy.python_reference" = ["_queue.cpp"]

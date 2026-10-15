@@ -85,6 +85,7 @@ class GuiCollection(unittest.TestCase):
                 "all_demand_count": 1,
                 "all_outcome_count": 1,
                 "objective": 0.0,
+                "objective_components": {"version":"opportunity-service-3","time_component":0.0,"tail_component":0.0,"queue_component":0.0,"failure_component":0.0,"energy_component":0.0},
             },
         )
         write_json(
@@ -92,15 +93,21 @@ class GuiCollection(unittest.TestCase):
             [
                 {
                     "request_id": "r1",
+                    "key":1,"vehicle_id":10000,"travel_min":5.0,"waiting_min":0.0,"charging_min":20.0,"service_time_min":25.0,
                     "status": "completed",
                     "requested_kwh": 20,
                     "delivered_kwh": 20,
                 }
             ],
         )
+        (self.folder / "events.csv").write_text("request_id,terminal_record,time_min,leg\nr1,arrival,5.0,0\n")
         (self.folder / "demand.csv").write_text("request_id\nr1\n")
         for name in ("opportunities.json", "traffic_plan.json", "initial_fleet.json"):
             write_json(self.folder / name, [])
+
+        opportunity = {"key":1,"vehicle_id":10000,"at":0.0,"cause":"scheduled"}
+        write_json(self.folder/"opportunities.json", [opportunity])
+        write_json(self.folder/"opportunity_outcomes.json", [{**opportunity,"status":"activated"}])
 
     def test_registration_refuses_overwrite(self):
         with self.assertRaises(FileExistsError):

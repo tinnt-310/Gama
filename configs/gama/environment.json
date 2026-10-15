@@ -1,5 +1,5 @@
 {
-  "environment_version": "persistent-controlled-v2",
+  "environment_version": "persistent-controlled-distributed-3",
   "cars": 3000,
   "private_evs": 1000,
   "electric_taxis": 700,
@@ -78,5 +78,24 @@
   "assumptions": "Provisional research fleet, frequencies and daily profiles; not measured Nha Trang statistics.",
   "consumption_kwh_km": 0.18,
   "charge_efficiency": 0.9,
-  "battery_capacity_kwh": 60.0
+  "battery_capacity_kwh": 60.0,
+  "observation_version": "station-observation-3",
+  "objective_version": "opportunity-service-3",
+  "safety_soc_reserve": 5.0,
+  "connector_assumption": "generic-public; provisional universal compatibility, not surveyed",
+  "temperature": 0.2,
+  "broadcast_minutes": 5.0,
+  "min_send_seconds": 10.0,
+  "event_workload_minutes": 5.0,
+  "event_exposure_count": 5,
+  "failure_beta": 1.0,
+  "energy_beta": 1.0,
+  "cost_scales": [
+    60.0,
+    60.0,
+    120.0,
+    120.0,
+    60.0
+  ],
+  "smoothing": "off"
 }

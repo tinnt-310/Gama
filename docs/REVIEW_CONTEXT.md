@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Final review package
 
 Review the implementation against `docs/IMPLEMENTATION_PLAN.md` (user-approved Gates 0–7), `docs/SERVICE_INTERFACE.md`, `docs/NUMERICS.md`, and rulings in `docs/PROGRESS.md`. Gate 8 is explicitly deferred.

@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Rà soát và triển khai điều phối EV→Station — 08/10/2026
 
 Đã triển khai điều phối trên bản đồ và 11 trạm hiện có, với forecast từ trạng thái fixed-port. GAML chạy mô phỏng, PDHG, GKPS và exact repair; Python chỉ kiểm chứng offline. Robot→EV vẫn `NOT_IMPLEMENTED`, chờ scheduler thật. Báo cáo này cập nhật trạng thái hiện tại; các kết quả mock và thay đổi GUI trước đây được giữ trong VALIDATION.md/PROGRESS.md như lịch sử.

@@ -1,5 +1,5 @@
 model ranr_persistent_fleet
-import "../Recommendation.gaml"
+import "../ChargingService.gaml"
 
 global {
     list<vehicle> ranr_city_vehicles -> agents of_generic_species vehicle;
@@ -11,6 +11,7 @@ global {
     list<map<string,unknown>> ranr_opportunities <- [];
     int ranr_inbound_cursor <- 0;
     int ranr_opportunity_cursor <- 0;
+    list<map<string,unknown>> ranr_opportunity_ledger <- [];
     int ranr_opportunity_count <- 0;
     int ranr_activated_count <- 0;
     int ranr_inbound_created <- 0;
@@ -38,6 +39,13 @@ global {
         have_rush <- bool(config["rush_enabled"]); rush_extra_percent <- float(config["rush_extra_percent"]);
         ranr_ev_speed <- float(config["ev_speed_kmh"]); ranr_car_speed <- float(config["car_speed_kmh"]);
         ranr_true_compliance <- float(config["compliance"]); ranr_true_defer <- float(config["defer_probability"]); ranr_burst_size <- int(config["burst_size"]);
+        ranr_temperature <- float(config["temperature"]); ranr_broadcast_period <- float(config["p2p_interval"]); ranr_min_send <- float(config["min_send_seconds"])/60.0;
+        ranr_delay <- float(config["delay_minutes"]); ranr_loss <- float(config["packet_loss"]); ranr_duplicate_probability <- float(config["duplicate_probability"]);
+        ranr_partition_begin <- float(config["partition_begin"]); ranr_partition_end <- float(config["partition_end"]);
+        ranr_behavior_case <- string(config["behavior_case"]); ranr_stabilization <- string(config["stabilization"]);
+        ranr_failure_beta <- float(config["failure_beta"]); ranr_energy_beta <- float(config["energy_beta"]);
+        ranr_true_decline <- float(config["decline_probability"]); ranr_abandon_after <- float(config["abandon_after_minutes"]);
+        ranr_station_events_file <- string(config["station_events"]);
         ranr_run_id <- "collect_"+string(ranr_collection_seed)+"_"+string(machine_time);
         file folder <- new_folder(ranr_project_prefix+"outputs/gama_ranr/gui_calibration/runs/"+ranr_run_id); ranr_output <- folder.path;
         ranr_collection_status <- ranr_gui_bridge("prepare");
@@ -125,6 +133,17 @@ global {
             }
         }
     }
+    action ranr_plan_burst(float at,int count) {
+        list<int> ids <- list(ranr_vehicle_by_id.keys) where (ranr_vehicle_by_id[each].ranr_vehicle_kind!="car");
+        loop entry over: ranr_inbound_plan where (float(each["at"])<=at and float(each["depart"])>at and each["kind"]!="car") { ids << int(entry["id"]); }
+        ids <- ids sort_by ranr_uniform(733,each,int(at));
+        loop slot from: 0 to: count-1 {
+            if count=0 { break; }
+            int id <- slot<length(ids) ? ids[slot] : -1;
+            string kind <- id in ranr_planned_kinds.keys ? ranr_planned_kinds[id] : "absent";
+            do ranr_plan_opportunity(id,kind,at,"burst");
+        }
+    }
     action ranr_initialize_fleet {
         int n <- 0;
         loop v over: list(car) { do ranr_configure_vehicle(v,1000+n,"car",false); n <- n+1; }
@@ -166,15 +185,7 @@ global {
                 loop offset over: [60.0,120.0] {
                     float at <- ranr_warmup+day*1440.0+offset;
                     if at>=end_at { continue; }
-                    list<int> ids <- list(ranr_vehicle_by_id.keys) where (ranr_vehicle_by_id[each].ranr_vehicle_kind!="car");
-                    loop entry over: ranr_inbound_plan where (float(each["at"])<=at and float(each["depart"])>at and each["kind"]!="car") { ids << int(entry["id"]); }
-                    ids <- ids sort_by ranr_uniform(733,each,int(at));
-                    loop slot from: 0 to: ranr_burst_size-1 {
-                        if ranr_burst_size=0 { break; }
-                        int id <- slot<length(ids) ? ids[slot] : -1;
-                        string kind <- id in ranr_planned_kinds.keys ? ranr_planned_kinds[id] : "absent";
-                        do ranr_plan_opportunity(id,kind,at,"burst");
-                    }
+                    do ranr_plan_burst(at,ranr_burst_size);
                 }
             }
         }
@@ -241,9 +252,12 @@ global {
             int id <- int(opportunity["vehicle_id"]); vehicle v <- ranr_vehicle_by_id[id];
             string status <- ranr_eligibility(v); float soc <- v=nil ? -1.0 : elecar(v).battery_level;
             ranr_opportunity_count <- ranr_opportunity_count+1;
+            map<string,unknown> entry <- ranr_record(opportunity); entry["status"] <- status; entry["soc"] <- soc;
+            entry["measured"] <- float(opportunity["at"])>=ranr_warmup and float(opportunity["at"])<ranr_warmup+ranr_measure;
+            ranr_opportunity_ledger << entry;
             if status="activated" {
                 elecar ev <- elecar(v);
-                ev.ranr_demand_key <- int(opportunity["key"]); ev.ranr_participating <- ranr_uniform(105,ev.ranr_demand_key,0)>=0.2;
+                ev.ranr_demand_key <- int(opportunity["key"]); ev.ranr_participating <- true; ev.ranr_measured <- bool(entry["measured"]);
                 ev.requested_energy <- max(0.0,(target_soc-ev.battery_level)*battery_capacity_kwh/100.0);
                 ask ev { do begin_request; }
                 ranr_activated_count <- ranr_activated_count+1;

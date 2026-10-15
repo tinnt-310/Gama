@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Đối chiếu bảy nhận xét và sửa mã — 08/10/2026
 
 Phạm vi: xác minh nhận xét trên source GAML/Python và runtime GAMA 1.9.3, gia cố rounding, cập nhật ETA và event export. Giữ primal, PDHG equations, entropy prox, step sizes, rounding probabilities và exact repair. Không thêm robot scheduler hoặc network backend.

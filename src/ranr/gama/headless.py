@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from ..paths import ROOT, GAMA_OUTPUTS, digest, write_json
+from .contracts import TERMINAL, OBJECTIVE_VERSION, OBSERVATION_VERSION, validate_ledger, finite_tree, rescore_components, validate_configuration
 
 ENVIRONMENT = json.loads((ROOT / "configs/gama/environment.json").read_text())
 ENVIRONMENT_VERSION = ENVIRONMENT["environment_version"]
@@ -42,6 +43,8 @@ class RunConfig:
     burst_size: int = 100
     compliance: float = 0.8
     defer_probability: float = 0.05
+    decline_probability: float = 0.0
+    abandon_after_minutes: float = -1.0
     render: bool = False
     trace: bool = False
     development: bool = False
@@ -57,10 +60,45 @@ class RunConfig:
     target_soc: float = ENVIRONMENT["target_soc"]
     rush_enabled: bool = True
     rush_extra_percent: float = ENVIRONMENT["rush_extra_percent"]
+    objective_version: str = OBJECTIVE_VERSION
+    observation_version: str = OBSERVATION_VERSION
+    temperature: float = ENVIRONMENT["temperature"]
+    p2p_interval: float = ENVIRONMENT["broadcast_minutes"]
+    min_send_seconds: float = ENVIRONMENT["min_send_seconds"]
+    delay_minutes: float = 0.5
+    packet_loss: float = 0.0
+    duplicate_probability: float = 0.0
+    partition_begin: float = -1.0
+    partition_end: float = -1.0
+    behavior_case: str = "moderate"
+    stabilization: str = "off"
+    failure_beta: float = ENVIRONMENT["failure_beta"]
+    energy_beta: float = ENVIRONMENT["energy_beta"]
+    station_events: str = ""
     calibration: str = ""
     timeout_seconds: float = 21600
 
     def __post_init__(self):
+        if self.objective_version != OBJECTIVE_VERSION or self.observation_version != OBSERVATION_VERSION:
+            raise ValueError("Objective/observation schema changed")
+        if self.stabilization not in {"off", "smoothing", "smoothing_hysteresis"} or self.behavior_case not in {"high", "moderate", "low", "contextual", "misspecified"}:
+            raise ValueError("Unknown design configuration")
+        for field in ("temperature", "p2p_interval", "min_send_seconds", "failure_beta", "energy_beta"):
+            if not math.isfinite(getattr(self, field)) or getattr(self, field) <= 0:
+                raise ValueError(f"Invalid {field}")
+        if not 0 <= self.packet_loss <= 1 or not 0 <= self.duplicate_probability <= 1 or not math.isfinite(self.delay_minutes) or self.delay_minutes < 0:
+            raise ValueError("Invalid communication configuration")
+        if not math.isfinite(self.partition_begin) or not math.isfinite(self.partition_end) or (self.partition_begin >= 0 and self.partition_end <= self.partition_begin):
+            raise ValueError("Invalid partition interval")
+        if self.station_events:
+            events=json.loads(Path(self.station_events).read_text())
+            if not isinstance(events,list):raise ValueError("Station events must be a list")
+            for event in events:
+                if (not finite_tree(event) or not isinstance(event.get("operational"),bool)
+                    or type(event.get("sid")) is not int or not 0<=event["sid"]<11
+                    or event.get("at",-1)<0 or not 0<=event.get("factor",-1)<=1
+                    or any(type(x)is not int or x<0 for x in event.get("failed_ports",[]))):
+                    raise ValueError("Invalid station event")
         if self.method not in METHODS or self.case not in CASES:
             raise ValueError("Unknown GAMA method/scenario")
         if self.environment_version != ENVIRONMENT_VERSION:
@@ -93,7 +131,7 @@ class RunConfig:
         ):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"Invalid {name}")
-        if not 0 <= self.compliance <= 1 or not 0 <= self.defer_probability <= 1:
+        if not math.isfinite(self.abandon_after_minutes) or not 0<=self.decline_probability<=1 or self.decline_probability+self.defer_probability>1 or not 0 <= self.compliance <= 1 or not 0 <= self.defer_probability <= 1:
             raise ValueError("Invalid driver probabilities")
         if (
             self.samples < 1
@@ -206,12 +244,14 @@ def parameter_record(
     ):
         raise ValueError(f"{method} needs {expected} finite GAMA parameters")
     return {
-        "schema": "gama-ranr-v2",
+        "schema": "gama-ranr-v3",
         "environment_version": ENVIRONMENT_VERSION,
         "backend": "GAMA",
         "method": method,
         "parameters": parameters,
-        "features": ["T", "W_mean", "W_P95", "H", "U"],
+        "objective_version": OBJECTIVE_VERSION,
+        "observation_version": OBSERVATION_VERSION,
+        "features": ["T_travel_charge", "W_mean", "W_P95", "H", "U"],
         "state_features": ["bias", "load", "burst", "exposure_uncertainty", "age"],
         "training_completed": trained,
         **metadata,
@@ -228,6 +268,8 @@ def load_model(path: Path, method: str, config: RunConfig) -> list[float]:
         "method",
         "features",
         "state_features",
+        "objective_version",
+        "observation_version",
         "environment_version",
     ):
         if record.get(key) != canonical[key]:
@@ -262,6 +304,7 @@ def load_model(path: Path, method: str, config: RunConfig) -> list[float]:
             "environment_version",
             "compliance",
             "defer_probability",
+            "decline_probability", "abandon_after_minutes", "temperature", "p2p_interval", "min_send_seconds", "stabilization", "behavior_case", "failure_beta", "energy_beta", "objective_version", "observation_version",
         ):
             if locked.get(key) != getattr(config, key):
                 raise ValueError(f"Model and run configuration differ: {key}")
@@ -337,7 +380,7 @@ def last_simulation_minute(folder: Path) -> float | None:
     """Read physical progress, independently of a possibly stale running marker."""
     import csv
 
-    path = folder / "legacy_population.csv"
+    path = folder / "population_population.csv"
     if not path.is_file():
         return None
     last = None
@@ -369,6 +412,7 @@ def run(
         "config": config_record,
         "parameters": record,
         "source": provenance(),
+        "station_events_sha256": digest(Path(config.station_events)) if config.station_events else None,
         "calibration_sha256": (
             digest(Path(config.calibration)) if config.calibration else None
         ),
@@ -399,6 +443,8 @@ def run(
     write_json(folder / "candidate.json", record)
     if config.calibration:
         shutil.copy2(config.calibration, folder / "calibration.json")
+    if config.station_events:
+        shutil.copy2(config.station_events,folder/"station_events.json")
     started = time.perf_counter()
     env = os.environ.copy()
     env.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
@@ -448,6 +494,19 @@ def run(
         p.clear()
         values = {
             "ranr_gui_preview": False,
+            "ranr_temperature": config.temperature,
+            "ranr_broadcast_period": config.p2p_interval,
+            "ranr_min_send": config.min_send_seconds/60.0,
+            "ranr_delay": config.delay_minutes,
+            "ranr_loss": config.packet_loss,
+            "ranr_duplicate_probability": config.duplicate_probability,
+            "ranr_partition_begin": config.partition_begin,
+            "ranr_partition_end": config.partition_end,
+            "ranr_behavior_case": config.behavior_case,
+            "ranr_stabilization": config.stabilization,
+            "ranr_failure_beta": config.failure_beta,
+            "ranr_energy_beta": config.energy_beta,
+            "ranr_station_events_file": str(folder/"station_events.json") if config.station_events else "",
             "ranr_method": config.method,
             "ranr_case": config.case,
             "ranr_run_id": run_id,
@@ -461,6 +520,8 @@ def run(
             "ranr_render": config.render,
             "ranr_true_compliance": config.compliance,
             "ranr_true_defer": config.defer_probability,
+            "ranr_true_decline": config.decline_probability,
+            "ranr_abandon_after": config.abandon_after_minutes,
             "ranr_calibrating": config.calibrating,
             "ranr_samples": config.samples,
             "ranr_warmup": config.warmup_minutes,
@@ -532,6 +593,7 @@ def run(
                 f"GAMA simulation failed/incomplete: {folder}; {console[-2500:]}"
             )
         completion = json.loads((folder / "completion.json").read_text())
+        validate_configuration(json.loads((folder/"configuration.json").read_text()),asdict(config))
         metrics = json.loads((folder / "metrics.json").read_text())
         outcomes = json.loads((folder / "outcomes.json").read_text())
         if (
@@ -554,7 +616,7 @@ def run(
             outcome_ids
         ):
             raise ValueError("Duplicate or mismatched demand outcomes")
-        terminal = {"completed", "failed", "stranded", "deferred", "unserved"}
+        terminal = TERMINAL
         for outcome in outcomes:
             if outcome["status"] not in terminal or not all(
                 math.isfinite(value)
@@ -564,9 +626,7 @@ def run(
                 raise ValueError("Invalid terminal demand outcome")
             if not 0 <= outcome["delivered_kwh"] <= outcome["requested_kwh"] + 1e-7:
                 raise ValueError("Invalid delivered energy")
-        if not all(
-            math.isfinite(x) for x in metrics.values() if isinstance(x, (int, float))
-        ):
+        if not finite_tree(metrics):
             raise ValueError("Nonfinite GAMA metrics")
         if config.method == "No-P2P" and metrics["messages"] != 0:
             raise ValueError("No-P2P leaked communication")
@@ -579,16 +639,15 @@ def run(
             and digest(folder / "calibration.json") != inputs["calibration_sha256"]
         ):
             raise ValueError("Calibration changed during GAMA run")
+        if config.station_events and digest(Path(config.station_events))!=inputs["station_events_sha256"]:
+            raise ValueError("Station event scenario changed during execution")
         if provenance() != inputs["source"]:
             raise ValueError("Source changed during GAMA run")
-        if (
-            not config.development
-            and not config.calibrating
-            and metrics["demand_count"] == 0
-        ):
-            raise ValueError(
-                "No activated charging demand: revise development feasibility before candidate evaluation"
-            )
+        validate_ledger(json.loads((folder / "opportunities.json").read_text()), json.loads((folder / "opportunity_outcomes.json").read_text()), outcomes)
+        if abs(rescore_components(metrics["objective_components"]) - metrics["objective"]) > 1e-6:
+            raise ValueError("Objective decomposition mismatch")
+        if not config.development and not config.calibrating and not metrics["fitness_valid"]:
+            raise ValueError("No measurement opportunities: invalid candidate fitness")
         metrics["wall_seconds"] = time.perf_counter() - started
         resources = [json.loads(p.read_text()) for p in folder.glob("*.resources.json")]
         metrics["cpu_seconds"] = sum(

@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 **Mô tả thuật toán theo mã nguồn hiện tại — 08/10/2026**
 
 Tài liệu này mô tả working tree hiện tại, sau lần bổ sung workload theo từng cặp EV–station. Đây là bản giải thích source, không phải tuyên bố toàn bộ nhánh mới đã được nghiệm thu. Các tài liệu IMPLEMENTATION_PLAN, NUMERICS và các báo cáo benchmark cũ còn có chỗ dùng workload cố định d_n; các kết quả ấy không tự trở thành kết quả của phiên bản d_nm/chi phí điện.
@@ -243,7 +245,7 @@ Aggregate về ETA bins tạo:
 
 ```text
 H_vir[m,h] = Σ valid committed requests tới m trong bin h d_chosen
-A[m,h](x) = H_vir[m,h] + Σ_current_batch δ[n,m,h] d[n,m] x[n,m]
+Am,h (`5800181:docs/x`) = H_vir[m,h] + Σ_current_batch δ[n,m,h] d[n,m] x[n,m]
 ```
 
 Fractional x và preliminary rounding không ghi ledger. Chỉ final repaired z commit. Refresh cập nhật ETA từ remaining committed route; workload vẫn là lượng đã chốt lúc commit cho tới arrival. Cancellation/stranded/removal được remove. Reliability=1 khi request còn hiệu lực; không decay tùy ý. Hiện không có calibrated uncertainty, TTL/late eviction hoặc mô hình xác suất arrival.

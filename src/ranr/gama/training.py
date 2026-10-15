@@ -78,6 +78,14 @@ def train(
             "Training requires actual GAMA benchmark, estimator gate and correctness validation"
         )
     if not smoke:
+        freeze = json.loads((OUTPUT / "design_freeze.json").read_text())
+        if (freeze.get("source") != provenance() or freeze.get("objective_version") != "opportunity-service-3"
+            or not all(freeze.get(k) for k in ("passed", "calibration_passed", "information_passed", "exposure_passed", "objective_sensitivity_passed", "design_validation_passed"))):
+            raise ValueError("Official training requires current-source calibration, distributed correctness, objective sensitivity and design freeze")
+        selected = freeze.get("selected_config",{})
+        for name in ("temperature","p2p_interval","stabilization","failure_beta","energy_beta"):
+            if selected.get(name)!=getattr(config,name):
+                raise ValueError(f"Config differs from frozen design: {name}")
         physical = json.loads((OUTPUT / "development_validation.json").read_text())
         if not physical.get("passed") or physical.get("source") != provenance():
             raise ValueError(
@@ -166,7 +174,9 @@ def train(
         )
         if smoke:
             long_config = config
-        limit = specification["hours"] * 3600
+        design_seconds = 0.0 if smoke else float(freeze.get("design_wall_seconds",0.0))
+        limit = min(specification["hours"]*3600,72*3600-design_seconds)
+        if limit<=0: raise ValueError("Training/validation allowance exhausted by development design validation")
         start = time.monotonic()
         previous_active = state["active_seconds"]
 

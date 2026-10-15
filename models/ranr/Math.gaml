@@ -1,8 +1,10 @@
 model ranr_math
-import "../StationForecast.gaml"
+import "../Mobility.gaml"
 
 global {
-    bool ranr_enabled <- false;
+    bool ranr_enabled <- true;
+    float charge_efficiency <- 0.9;
+    list<float> zero_vector(int count) { list<float> result <- []; if count>0 { loop k from:0 to:count-1 { result << 0.0; } } return result; }
     string ranr_method <- "RANR-AW";
     string ranr_project_prefix <- file_exists("../configs/gama/environment.json") ? "../" : "../../";
     map<string,unknown> ranr_environment <- json_file(ranr_project_prefix+"configs/gama/environment.json").contents;
@@ -31,11 +33,32 @@ global {
     float ranr_deadline <- 360.0;
     float ranr_horizon <- 120.0;
     float ranr_ttl <- 180.0;
-    float ranr_temperature <- 0.2;
+    string ranr_observation_version <- "station-observation-3";
+    string ranr_objective_version <- "opportunity-service-3";
+    float ranr_temperature <- float(ranr_environment["temperature"]);
+    float ranr_safety_soc <- float(ranr_environment["safety_soc_reserve"]);
+    float ranr_min_send <- float(ranr_environment["min_send_seconds"])/60.0;
+    float ranr_event_workload <- float(ranr_environment["event_workload_minutes"]);
+    int ranr_event_exposure <- int(ranr_environment["event_exposure_count"]);
+    float ranr_failure_beta <- float(ranr_environment["failure_beta"]);
+    float ranr_energy_beta <- float(ranr_environment["energy_beta"]);
+    string ranr_station_events_file <- "";
+    float ranr_duplicate_probability <- 0.0;
+    float ranr_partition_begin <- -1.0;
+    float ranr_partition_end <- -1.0;
+    string ranr_behavior_case <- "moderate";
+    string ranr_stabilization <- "off";
+    float ranr_smoothing_alpha <- 0.5;
+    float ranr_hysteresis_minutes <- 1.0;
+    map<string,map<string,unknown>> ranr_response_prior <- [];
+    list<float> ranr_policy_latencies <- [];
+    map<string,float> ranr_prediction_diagnostics <- [];
+
     float ranr_ev_speed <- 30.0;
     float ranr_car_speed <- 50.0;
     float ranr_assumed_compliance <- 0.6;
     float ranr_assumed_defer <- 0.05;
+    float ranr_arrival_probability <- 1.0;
     float ranr_prior_background_rate <- 0.015;
     float ranr_prior_rate <- 0.06; // Per station/minute; official runs replace with GAMA train calibration.
     float ranr_private_frequency <- float(ranr_environment["private_opportunities_per_day"]);
@@ -49,16 +72,18 @@ global {
     string ranr_collection_status <- "Not collected";
     float ranr_true_compliance <- 0.8;
     float ranr_true_defer <- 0.05;
+    float ranr_true_decline <- 0.0;
+    float ranr_abandon_after <- -1.0;
     float ranr_delay <- 0.5;
     float ranr_loss <- 0.0;
     float ranr_snapshot_width <- 5.0;
     float ranr_energy_width <- 5.0;
-    float ranr_broadcast_period <- 5.0;
+    float ranr_broadcast_period <- float(ranr_environment["broadcast_minutes"]);
     int ranr_burst_size <- 100;
     list<float> ranr_parameters <- [];
     map<string,unknown> ranr_loaded_model <- [];
     bool ranr_candidate_loaded <- false;
-    list<float> ranr_scales <- [30.0,60.0,120.0,120.0,60.0];
+    list<float> ranr_scales <- list<float>(ranr_environment["cost_scales"]);
     list<float> ranr_release_fractions <- [0.5];
     list<float> ranr_energy_fractions <- [0.5];
     list<float> ranr_energy_prior <- [20.0];
@@ -105,16 +130,16 @@ global {
         } else {
             if !file_exists(ranr_parameter_file) { ranr_error <- "Parameter file does not exist: "+ranr_parameter_file; return nil; }
             ranr_loaded_model <- json_file(ranr_parameter_file).contents;
-            if !(ranr_loaded_model["schema"]="gama-ranr-v2" and ranr_loaded_model["backend"]="GAMA" and ranr_loaded_model["method"]=ranr_method) {
+            if !(ranr_loaded_model["schema"]="gama-ranr-v3" and ranr_loaded_model["backend"]="GAMA" and ranr_loaded_model["method"]=ranr_method) {
                 ranr_error <- "Parameter schema/backend/method mismatch"; return nil;
             }
             if string(ranr_loaded_model["environment_version"])!=ranr_environment_version { ranr_error <- "Model environment version mismatch; recalibrate and retrain"; return nil; }
             list<string> features <- ranr_loaded_model["features"];
-            if features!=["T","W_mean","W_P95","H","U"] { ranr_error <- "Parameter feature order mismatch"; return nil; }
+            if features!=["T_travel_charge","W_mean","W_P95","H","U"] { ranr_error <- "Parameter feature order mismatch"; return nil; }
             if list<string>(ranr_loaded_model["state_features"])!=["bias","load","burst","exposure_uncertainty","age"] { ranr_error <- "Parameter state feature order mismatch"; return nil; }
-            bool gui_mode <- ranr_run_id="gui" or "gui_" in ranr_run_id;
-            if gui_mode and !ranr_development and !bool(ranr_loaded_model["training_completed"]) {
-                ranr_error <- "GUI requires a GAMA-trained model selected by long validation"; return nil;
+            if !ranr_development and !bool(ranr_loaded_model["training_completed"]) {
+                string validation <- ranr_gui_bridge("candidate");
+                if !("CANDIDATE VALID" in validation) { ranr_error <- "Untrained vector requires a registered GAMA evaluation: "+validation; return nil; }
             }
             ranr_parameters <- ranr_loaded_model["parameters"];
             if bool(ranr_loaded_model["training_completed"]) {
@@ -130,6 +155,8 @@ global {
                    float(config["rush_extra_percent"])!=rush_extra_percent or bool(config["rush_enabled"])!=have_rush or
                    float(config["soc_threshold"])!=ranr_soc_threshold or float(config["target_soc"])!=target_soc or
                    float(config["ev_speed_kmh"])!=ranr_ev_speed or float(config["car_speed_kmh"])!=ranr_car_speed or
+                   float(config["temperature"])!=ranr_temperature or float(config["p2p_interval"])!=ranr_broadcast_period or float(config["min_send_seconds"])/60.0!=ranr_min_send or
+                   string(config["stabilization"])!=ranr_stabilization or string(config["behavior_case"])!=ranr_behavior_case or float(config["failure_beta"])!=ranr_failure_beta or float(config["energy_beta"])!=ranr_energy_beta or
                    int(config["samples"])!=ranr_samples or float(config["deadline_minutes"])!=ranr_deadline {
                     ranr_error <- "Selected configuration differs from trained model"; return nil;
                 }
@@ -158,6 +185,7 @@ global {
         result["powers"] <- copy(input["powers"]);
         result["release_lo"] <- copy(input["release_lo"]);
         result["release_hi"] <- copy(input["release_hi"]);
+        if "connectors" in input.keys { result["connectors"] <- copy(input["connectors"]); }
         list<map<string,unknown>> queue <- [];
         list<map<string,unknown>> source <- input["queue"];
         loop job over: source { queue << ranr_record(job); }
@@ -174,6 +202,11 @@ global {
             map<string,unknown> cohort <- ranr_record(value); cohort["travel"] <- copy(value["travel"]); cohorts << cohort;
         }
         result["exposure"] <- cohorts;
+        if "resolutions" in input.keys {
+            list<map<string,unknown>> resolutions <- [];
+            loop resolution over:list<map<string,unknown>>(input["resolutions"]) { resolutions << ranr_record(resolution); }
+            result["resolutions"] <- resolutions;
+        }
         return result;
     }
     action ranr_index_calibration {
@@ -196,7 +229,7 @@ global {
         list<float> lo <- snapshot["release_lo"]; list<float> hi <- snapshot["release_hi"];
         list<map<string,unknown>> queue <- snapshot["queue"];
         float energy <- sum(queue collect ((float(each["low"])+float(each["high"]))/2.0));
-        return (sum(lo)+sum(hi))/(2.0*length(powers)*60.0)+energy/(charge_efficiency*sum(powers));
+        return (sum(lo)+sum(hi))/(2.0*max(1,length(powers))*60.0)+energy/(charge_efficiency*max(1e-9,sum(powers)));
     }
     float ranr_normal(int domain,int entity,int draw) {
         return sqrt(-2.0*ln(ranr_uniform(domain,entity,2*draw)))*cos(360.0*ranr_uniform(domain,entity,2*draw+1));
@@ -205,11 +238,47 @@ global {
         assert !empty(ranr_eta_factors);
         return ranr_eta_factors[min(length(ranr_eta_factors)-1,int(ranr_uniform(324,entity,draw)*length(ranr_eta_factors)))];
     }
+    list<float> ranr_feasible_travel(map<string,unknown> request,map<string,unknown> observation) {
+        list<float> travel <- copy(list<float>(request["travel"]));
+        list<map<string,unknown>> snapshots <- observation["snapshots"];
+        loop sid from:0 to:length(travel)-1 {
+            map<string,unknown> snapshot <- snapshots[sid];
+            if ("operational" in snapshot.keys and !bool(snapshot["operational"])) or
+               ("connectors" in snapshot.keys and "connector" in request.keys and !(string(request["connector"]) in list<string>(snapshot["connectors"]))) or
+               sum(list<float>(snapshot["powers"]))<=0.0 { travel[sid] <- -1.0; }
+        }
+        return travel;
+    }
+    list<float> ranr_response_mass(list<float> travel,int recommended,string context) {
+        list<float> mass <- ranr_base(travel) collect ((1.0-ranr_assumed_defer)*(1.0-ranr_assumed_compliance)*each);
+        if recommended>=0 and recommended<length(mass) { mass[recommended] <- mass[recommended]+(1.0-ranr_assumed_defer)*ranr_assumed_compliance; }
+        mass << ranr_assumed_defer;
+        if !(context in ranr_response_prior.keys) and "default" in ranr_response_prior.keys { context <- "default"; }
+        if context in ranr_response_prior.keys {
+            map<string,unknown> prior <- ranr_response_prior[context];
+            float other <- float(prior["other"]); float follow <- float(prior["match"]); float outside <- float(prior["outside"]);
+            list<float> alternative <- ranr_base(travel); if recommended>=0 { alternative[recommended] <- 0.0; }
+            float available <- sum(alternative);
+            mass <- available>0.0 ? alternative collect (other*each/available) : zero_vector(length(travel));
+            if recommended>=0 { mass[recommended] <- mass[recommended]+follow+(available<=0.0 ? other : 0.0); }
+            mass << outside;
+        }
+        float total <- sum(mass); return total>0.0 ? mass collect (each/total) : mass;
+    }
+    // Bayes: B~Bernoulli(p), other anonymous arrivals~Poisson(lambda), A=B+other.
+    // The Poisson model for other cohorts is a declared mean-field approximation.
+    float ranr_seen_posterior(float probability,int observed,float other_mean) {
+        if observed<=0 or probability<=0.0 { return 0.0; }
+        if probability>=1.0 { return 1.0; }
+        float a <- probability*observed; float b <- (1.0-probability)*max(0.0,other_mean);
+        return a/max(1e-12,a+b);
+    }
     list<float> ranr_outstanding_mass(map<string,unknown> cohort,float at) {
         list<float> travel <- list<float>(cohort["travel"]);
-        list<float> mass <- ranr_base(travel) collect ((1.0-ranr_assumed_defer)*(1.0-ranr_assumed_compliance)*each);
         int recommended <- int(cohort["recommended"]);
-        mass[recommended] <- mass[recommended]+(1.0-ranr_assumed_defer)*ranr_assumed_compliance;
+        list<float> mass <- ranr_response_mass(travel,recommended,"context" in cohort.keys ? string(cohort["context"]) : "default");
+        remove index:length(mass)-1 from:mass;
+        if "resolved" in cohort.keys and bool(cohort["resolved"]) { return zero_vector(length(travel)); }
         loop sid from: 0 to: length(travel)-1 {
             if travel[sid]<=0.0 { mass[sid] <- 0.0; continue; }
             float ratio <- max(0.0,at-float(cohort["issued"]))/travel[sid];
@@ -220,7 +289,7 @@ global {
             }
             mass[sid] <- mass[sid]*(1.0-float(low)/length(ranr_sorted_eta));
         }
-        return mass;
+        return mass collect (each*ranr_arrival_probability);
     }
     int ranr_categorical(list<float> probabilities,float uniform) {
         float cumulative <- 0.0;
@@ -266,7 +335,8 @@ global {
     // Strict FIFO heterogeneous independent ports, including EV acceptance limits.
     map<string,unknown> ranr_shadow(list<float> powers,list<float> releases,list<map<string,unknown>> jobs) {
         assert length(powers)>0 and length(powers)=length(releases);
-        list<float> free_at <- copy(releases); list<float> waits <- []; list<float> starts <- [];
+        list<float> free_at <- copy(releases);
+        loop j from:0 to:length(powers)-1 { if powers[j]<=0.0 { free_at[j] <- 1e100; } } list<float> waits <- []; list<float> starts <- []; list<float> services <- []; list<float> nominal <- []; list<float> delivered <- [];
         float last_start <- 0.0; float tick <- step/60.0;
         loop job over: jobs {
             float arrival <- tick*ceil(float(job["at"])/tick-1e-10);
@@ -277,15 +347,17 @@ global {
                 if a < b-1e-10 or (abs(a-b)<=1e-10 and (min(powers[j],float(job["max_kw"]))>min(powers[selected],float(job["max_kw"])) or (min(powers[j],float(job["max_kw"]))=min(powers[selected],float(job["max_kw"])) and powers[j]>powers[selected]))) { selected <- j; }
             }
             float begin <- max(free_at[selected],lower);
+            if max(powers)<=0.0 { begin <- 1e100; }
             float deadline <- "deadline" in job.keys ? float(job["deadline"]) : 1e100;
             if begin>=deadline {
-                starts << deadline; waits << max(0.0,deadline-arrival); last_start <- max(last_start,deadline); continue;
+                starts << deadline; nominal << 0.0; services << 0.0; delivered << 0.0; waits << max(0.0,deadline-arrival); last_start <- max(last_start,deadline); continue;
             }
             float service_minutes <- 60.0*float(job["energy"])/(charge_efficiency*min(powers[selected],float(job["max_kw"])));
             free_at[selected] <- min(deadline,begin+tick*max(1.0,ceil(service_minutes/tick-1e-10)));
+            nominal << service_minutes; services << max(0.0,min(service_minutes,deadline-begin)); delivered << min(float(job["energy"]),max(0.0,deadline-begin)*charge_efficiency*min(powers[selected],float(job["max_kw"]))/60.0);
             starts << begin; waits << max(0.0,begin-arrival); last_start <- begin;
         }
         ranr_queue_calls <- ranr_queue_calls+1;
-        return ["free"::free_at,"waits"::waits,"starts"::starts,"total"::sum(waits)];
+        return ["free"::free_at,"waits"::waits,"starts"::starts,"total"::sum(waits),"services"::services,"nominal_services"::nominal,"delivered"::delivered];
     }
 }

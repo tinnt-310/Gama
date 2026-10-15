@@ -1,49 +1,44 @@
-# Kiến trúc môi trường thống nhất v2
+# Kiến trúc nghiên cứu GAMA RANR-AW
 
-GAMA thực thi một mô hình: đội xe thường trực, controlled charging opportunities và xe nhập thành phố giờ cao điểm. GUI và Headless cùng gọi `models/main.gaml`; khác cách khởi chạy và hiển thị. Run ID chỉ định danh đầu ra.
+Môi trường `persistent-controlled-distributed-3`. GAMA thực thi vật lý, nhu cầu và recommendation; Python điều phối GAMA, kiểm chứng và phân tích. Không có simulator Python trong nguồn hiện hành. Checkpoint trước sửa: Git `5800181`; mã legacy và dữ liệu nghiên cứu lịch sử có thể đối chiếu tại checkpoint, không thuộc pipeline hiện tại.
 
 ```text
-configs/gama/
-    environment.json       # Nguồn chuẩn: fleet, tần suất, bảng giờ, SOC, inbound
-    research.json           # Profile nghiên cứu
-    calibration.json        # Profile calibration dùng cho GUI và Headless
-    smoke.json              # Fixture nhỏ có nhãn development
 models/
-    main.gaml               # GIS initialization, GUI chung
-    Mobility.gaml           # Native driving, trạng thái xe, quãng đường
-    ChargingService.gaml    # Cổng, FIFO, năng lượng, vòng đời phiên sạc
-    ranr/
-        Fleet.gaml          # ID xe, cửa ngõ, traffic plan, cơ hội sạc, collection GUI
-        Runtime.gaml        # Observation → recommendation → EV choice → metrics
-        Math.gaml           # Tham số và hợp đồng model
-        Prediction.gaml     # Snapshot và dự báo ETA, ngoại tác ghép cặp
-        Policy.gaml         # Bốn phương pháp, cùng 5 tiêu chí
-    tests/                  # Fixture vật lý, thông tin, prediction, fleet và compatibility
-src/ranr/gama/
-    headless.py             # RunConfig, launcher, provenance, completion checking
-    gui_collection.py       # Registration, kiểm chứng và tổng hợp calibration GUI
-    pipeline.py             # Calibration, paired jobs, CI/Holm/reporting
-    development.py          # Kiểm chứng development dài và báo cáo tính khả thi
-    benchmarking.py         # Accuracy gate và benchmark GAMA
-    training.py             # CMA-ES/checkpoint/long validation qua Headless
-    analysis.py             # Phân tích kết quả GAMA
-    cli.py                  # CLI chính thức
-scripts/
-    gama.py                 # Compatibility launcher
-    gui_calibration.py      # Bridge được gọi từ nút trong GAMA
-    java/CheckModel.java    # Compile nhiều GAML root trong một JVM
-outputs/gama_ranr/
-    gui/                    # GUI exploration
-    gui_calibration/        # Runs, immutable builds và latest pointer
-    development/            # Long development validation
-    benchmark/, training/, evaluation/
-    unified_fleet_v2_20261015/  # Backup, smoke và hồ sơ refactor
-includes/                   # GIS gốc giữ nguyên
-src/ranr/legacy/             # Python reference/launcher lịch sử được tách namespace
+  main.gaml                    GIS, khởi tạo, Run me và Collect training data
+  Mobility.gaml                native driving, hoạt động và xe thường trực
+  ChargingService.gaml         cổng có ID, FIFO, SOC/energy, lifecycle sạc
+  ranr/
+    Math.gaml                  cấu hình, record helpers, RNG, weights, shadow queue
+    Prediction.gaml            snapshot/ETA Monte Carlo, externality ghép cặp
+    Policy.gaml                observation từng trạm, exposure, recommendation
+    Fleet.gaml                 opportunities, eligibility, inbound/outbound
+    Evaluation.gaml            outcome và objective phân rã
+    Runtime.gaml               thứ tự sự kiện, transport, behavior, logs
+  tests/                       fixtures GAML nhỏ, không phải kết quả nghiên cứu
+src/ranr/
+  gama/
+    contracts.py               kiểm chứng ledger/schema và phân tích objective
+    headless.py                config, provenance, GAMA execution, completion
+    launcher.py                JVM/GAMA portable launcher
+    validation.py              compiler và native fixture harness
+    gui_collection.py          đăng ký/kiểm chứng/build calibration GUI
+    pipeline.py                paired runs, calibration và CI/Holm/report
+    benchmarking.py            accuracy/performance gates
+    development.py             kiểm chứng vật lý/demand theo ngày
+    design.py                  design comparisons và evidence-linked freeze
+    training.py                CMA-ES, checkpoint, resume, validation dài
+    analysis.py                sensitivity và training reporting
+    cli.py                     các lệnh chính thức
+configs/gama/                  cấu hình môi trường và các profile
+scripts/                       entry point mỏng và Java compiler helper
+includes/                      GIS và icon gốc, bảo toàn
+outputs/gama_ranr/              run riêng, manifests, checkpoints, báo cáo
 ```
 
-Snapshot, packet và exposure nằm trong ChargingService, Math/Policy và Runtime; thuật toán được import theo chuỗi GAML, không nhân bản cho GUI. Không có simulator Python trong pipeline chính thức.
+Chiều import GAML là một DAG: Runtime → Evaluation → Fleet → ChargingService → Policy → Prediction → Math → Mobility. Không còn import Recommendation, Coordination, ConvexAssignment hoặc StationForecast lịch sử.
 
-Vòng đời xe và vòng đời demand độc lập: terminal outcome giải phóng nhu cầu, không giải phóng agent. Xe vãng lai chỉ được tạo bởi traffic plan và chỉ chết tại exit; xe thường trực stranded được giữ lại. Profile test có thể tạo trạng thái nhân tạo để kiểm chứng invariant nhưng không được dùng làm dữ liệu calibration nghiên cứu.
+Observation và request là các record số được sao chép. Policy không nhận agent, global fleet hoặc opportunity manifest. PhysicalState tồn tại trong GAMA; evaluator được phép đọc truth để ghi kết quả. Bộ vận chuyển truy cập địa chỉ agent nhằm giao packet, không cung cấp trạng thái peer cho policy.
 
-Compatibility: bỏ các experiment GUI lịch sử khỏi main nghiên cứu; bản nguồn và tài liệu đầy đủ nằm trong source_before.tar.gz cùng manifest hash. Các regression tham chiếu số EV tổng cũ được chuyển sang số private/taxi và total suy ra. Fixture rush/configuration cũ chuyển sang regression fleet mới. Mã reference độc lập được giữ để kiểm chứng thuật toán, không dùng để mô phỏng thay GAMA.
+Một tick xử lý service và các terminal events, deadline, arrival, packet đã đến từ tick trước, exceptional replanning, opportunities, request có thứ tự ID, capture/broadcast và logging. Packet phát trong tick này chỉ nhận từ tick sau kể cả delay=0; local exposure cập nhật ngay. Đây là thứ tự scheduler xác định, không có barrier chờ quyết định toàn mạng hay central dispatcher.
+
+Output từng run gồm configuration, initial fleet, opportunity/traffic manifests, opportunity_results, opportunity_outcomes, demand, recommendations, messages, events, vehicles, queue_history, outcomes, metrics và completion. GUI calibration bổ sung registration/provenance từ đầu và artifact hashes khi hoàn tất. Model/calibration/schema cũ bị từ chối; không sửa nhãn nguồn cũ.

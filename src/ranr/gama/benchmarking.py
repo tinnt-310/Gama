@@ -14,7 +14,7 @@ from .pipeline import benchmark_budget
 
 
 def _probes(calibration: str, folder: Path, samples: int) -> dict:
-    from ..legacy.scripts.check_gama import run_model
+    from .validation import run_model
 
     target = folder / f"probes_{samples}.csv"
     if not target.exists():

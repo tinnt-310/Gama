@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Flowchart chi tiết hệ thống và thuật toán hiện tại
 
 **Đối chiếu mã: 09/10/2026.** Kiến trúc Distributed Observation-Driven Charging Recommendation. Các sơ đồ diễn tả implementation hiện có, không thay đổi model hoặc đề xuất một policy mới.
@@ -40,7 +42,7 @@ Luồng logic tổng thể. Các reflex GAMA chạy theo lịch của simulator;
 
 [SVG phóng to](flowcharts/01_overview.svg) · [Mermaid](flowcharts/01_overview.mmd) · [Graphviz DOT](flowcharts/01_overview.dot)
 
-**Nguồn:** [main.gaml](../models/main.gaml), [Mobility.gaml](../models/Mobility.gaml), [Recommendation.gaml](../models/Recommendation.gaml), [ChargingService.gaml](../models/ChargingService.gaml), [Coordination.gaml](../models/Coordination.gaml).
+**Nguồn:** [main.gaml](../models/main.gaml), [Mobility.gaml](../models/Mobility.gaml), Recommendation.gaml (`5800181:models/Recommendation.gaml`), [ChargingService.gaml](../models/ChargingService.gaml), Coordination.gaml (`5800181:models/Coordination.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -131,7 +133,7 @@ Batch mặc định 60 giây. Tất cả recommendations được tạo trước
 
 [SVG phóng to](flowcharts/02_epoch.svg) · [Mermaid](flowcharts/02_epoch.mmd) · [Graphviz DOT](flowcharts/02_epoch.dot)
 
-**Nguồn:** [Recommendation.gaml](../models/Recommendation.gaml).
+**Nguồn:** Recommendation.gaml (`5800181:models/Recommendation.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -199,7 +201,7 @@ Feasible về route, hardware và reserve khác với available về waiting inf
 
 [SVG phóng to](flowcharts/03_candidates.svg) · [Mermaid](flowcharts/03_candidates.mmd) · [Graphviz DOT](flowcharts/03_candidates.dot)
 
-**Nguồn:** [Coordination.gaml](../models/Coordination.gaml), [Recommendation.gaml](../models/Recommendation.gaml).
+**Nguồn:** Coordination.gaml (`5800181:models/Coordination.gaml`), Recommendation.gaml (`5800181:models/Recommendation.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -284,7 +286,7 @@ Quy tắc chính không học alpha. Nhánh đối chứng nearest/eta chọn tr
 
 [SVG phóng to](flowcharts/04_ranking.svg) · [Mermaid](flowcharts/04_ranking.mmd) · [Graphviz DOT](flowcharts/04_ranking.dot)
 
-**Nguồn:** [StationForecast.gaml](../models/StationForecast.gaml), [Recommendation.gaml](../models/Recommendation.gaml).
+**Nguồn:** StationForecast.gaml (`5800181:models/StationForecast.gaml`), Recommendation.gaml (`5800181:models/Recommendation.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -355,7 +357,7 @@ Tất cả modes bắt đầu từ physical shadow. B4/B4-N chọn historical sc
 
 [SVG phóng to](flowcharts/05_waiting.svg) · [Mermaid](flowcharts/05_waiting.mmd) · [Graphviz DOT](flowcharts/05_waiting.dot)
 
-**Nguồn:** [ChargingService.gaml](../models/ChargingService.gaml), [StationForecast.gaml](../models/StationForecast.gaml).
+**Nguồn:** [ChargingService.gaml](../models/ChargingService.gaml), StationForecast.gaml (`5800181:models/StationForecast.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -444,7 +446,7 @@ B4 cập nhật thống kê, B4-N có thể học correction theo horizon. Các 
 
 [SVG phóng to](flowcharts/06_learning.svg) · [Mermaid](flowcharts/06_learning.mmd) · [Graphviz DOT](flowcharts/06_learning.dot)
 
-**Nguồn:** [ChargingService.gaml](../models/ChargingService.gaml), [StationForecast.gaml](../models/StationForecast.gaml), [Recommendation.gaml](../models/Recommendation.gaml).
+**Nguồn:** [ChargingService.gaml](../models/ChargingService.gaml), StationForecast.gaml (`5800181:models/StationForecast.gaml`), Recommendation.gaml (`5800181:models/Recommendation.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -531,7 +533,7 @@ Chỉ apply_station_choice mới đổi destination trong recommendation runtime
 
 [SVG phóng to](flowcharts/07_choice_arrival.svg) · [Mermaid](flowcharts/07_choice_arrival.mmd) · [Graphviz DOT](flowcharts/07_choice_arrival.dot)
 
-**Nguồn:** [Recommendation.gaml](../models/Recommendation.gaml), [ChargingService.gaml](../models/ChargingService.gaml).
+**Nguồn:** Recommendation.gaml (`5800181:models/Recommendation.gaml`), [ChargingService.gaml](../models/ChargingService.gaml).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>
@@ -751,7 +753,7 @@ Nhánh này phối hợp nhiều EV rồi hard commit. LB/UB chỉ thuộc surro
 
 [SVG phóng to](flowcharts/10_ideal.svg) · [Mermaid](flowcharts/10_ideal.mmd) · [Graphviz DOT](flowcharts/10_ideal.dot)
 
-**Nguồn:** [Coordination.gaml](../models/Coordination.gaml), [ConvexAssignment.gaml](../models/ConvexAssignment.gaml).
+**Nguồn:** Coordination.gaml (`5800181:models/Coordination.gaml`), ConvexAssignment.gaml (`5800181:models/ConvexAssignment.gaml`).
 
 <details>
 <summary>Mã Mermaid để chỉnh sửa</summary>

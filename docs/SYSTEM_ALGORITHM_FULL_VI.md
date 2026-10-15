@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Mô tả toàn bộ hệ thống và thuật toán khuyến nghị trạm sạc EV
 
 > **Phạm vi:** tài liệu này mô tả hệ thống GAMA B3/B4/B4-N lịch sử. Pipeline chính hiện là RANR GAMA: xem [hướng dẫn chạy](GAMA_RANR_RUN_GUIDE_VI.md) và [thay đổi khoa học](GAMA_RANR_SCIENTIFIC_CHANGES_VI.md). Pipeline Python tại [RANR_METHODS_VI.md](RANR_METHODS_VI.md) đã được lưu làm reference lịch sử.
@@ -100,13 +102,13 @@ main.gaml
 | [main.gaml](../models/main.gaml) | Nạp GIS, tạo road graph/building/trạm/xe, dân số, rush, GUI, tổng hợp ngày |
 | [Mobility.gaml](../models/Mobility.gaml) | Đồng hồ, lịch xe, native driving, road speed factor, đo remaining route |
 | [ChargingService.gaml](../models/ChargingService.gaml) | Lifecycle EV, physical FIFO/cổng, tích phân năng lượng, station-local history, replay, neighbor learning |
-| [StationForecast.gaml](../models/StationForecast.gaml) | Tham số forecast, hàm ranking thuần, discrete shadow và giải hệ ridge |
-| [Recommendation.gaml](../models/Recommendation.gaml) | Barrier forecast/recommendation/choice, query/response, intention tùy chọn, export recommendation |
-| [Coordination.gaml](../models/Coordination.gaml) | Candidate/route dùng chung; ideal batch/inbound/commit; event và station export |
-| [ConvexAssignment.gaml](../models/ConvexAssignment.gaml) | PDHG, primal/dual metrics, simplex projection, GKPS, exact repair của ideal benchmark |
-| [RecommendationBenchmark.gaml](../models/RecommendationBenchmark.gaml) | Mạng synthetic, demand có RNG riêng, burst/shift/light, kết thúc theo run_hours |
-| [verification/recommendation.py](../verification/recommendation.py) | Reference độc lập cho ranking, shadow, moving average, ridge |
-| [scripts/recommendation_experiments.py](../scripts/recommendation_experiments.py) | Development calibration, launcher và event evaluator |
+| StationForecast.gaml (`5800181:models/StationForecast.gaml`) | Tham số forecast, hàm ranking thuần, discrete shadow và giải hệ ridge |
+| Recommendation.gaml (`5800181:models/Recommendation.gaml`) | Barrier forecast/recommendation/choice, query/response, intention tùy chọn, export recommendation |
+| Coordination.gaml (`5800181:models/Coordination.gaml`) | Candidate/route dùng chung; ideal batch/inbound/commit; event và station export |
+| ConvexAssignment.gaml (`5800181:models/ConvexAssignment.gaml`) | PDHG, primal/dual metrics, simplex projection, GKPS, exact repair của ideal benchmark |
+| RecommendationBenchmark.gaml (`5800181:models/RecommendationBenchmark.gaml`) | Mạng synthetic, demand có RNG riêng, burst/shift/light, kết thúc theo run_hours |
+| verification/recommendation.py (`5800181:verification/recommendation.py`) | Reference độc lập cho ranking, shadow, moving average, ridge |
+| scripts/recommendation_experiments.py (`5800181:scripts/recommendation_experiments.py`) | Development calibration, launcher và event evaluator |
 
 ### 2.3. Phân tán về dữ liệu và tính toán
 

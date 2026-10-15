@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 > **Tài liệu lịch sử của simulator Python.** Từ 14/10/2026, nghiên cứu chính chuyển sang GAMA. Mã tương ứng nằm trong `src/ranr/legacy/python_reference/`; xem [trạng thái GAMA](GAMA_RANR_STATUS_VI.md).
 
 # Kiến trúc và tái cấu trúc RANR

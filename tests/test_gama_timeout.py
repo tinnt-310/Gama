@@ -20,7 +20,7 @@ class TimeoutRecovery(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             self.assertIsNone(last_simulation_minute(folder))
-            (folder / "legacy_population.csv").write_text(
+            (folder / "population_population.csv").write_text(
                 "time_min,total_cars\n\n0,3000\n1062,3000\nnan,3000\nunfinished"
             )
             self.assertEqual(last_simulation_minute(folder), 1062)
@@ -30,7 +30,7 @@ class TimeoutRecovery(unittest.TestCase):
             folder = Path(directory) / "run"
 
             def timeout(arguments, log, limit, environment):
-                (folder / "legacy_population.csv").write_text(
+                (folder / "population_population.csv").write_text(
                     "time_min,total_cars\n1062,3000\n"
                 )
                 (folder / "events.csv").write_text("preserved evidence\n")

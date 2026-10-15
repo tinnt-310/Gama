@@ -4,15 +4,11 @@ global {
     float step <- 1.0 #s;
     bool keyed_driving <- false;
     bool mobility_cache_distances <- true;
-    string CAR <- "car";
-    string EVS <- "elecar";
     graph road_network;
     float lane_width <- 1.0;
     float vehicle_icon_size_px <- 40.0;
     int batter_insufficient <- 0;
     list<point> lost_car_location <- [];
-    int vehi_capacity <- 10;
-    float electrical_consumption <- 11/60;
     int day_counter <- 1;
     float initial_hour <- 0.0;
     float schedule_start_hour <- 0.0;
@@ -27,22 +23,11 @@ global {
         return (elapsed_hours < 10 ? "0" : "") + string(elapsed_hours) + ":" +
             (minute_part < 10 ? "0" : "") + string(minute_part);
     }
-    float percent_rush_hour <- 0.7;
-    float percent_charge <- 0.7;
-    bool proba_charging_night <- flip(percent_charge);
-    float proba_charge_home <- 0.3;
     float car_speed <- rnd(50.0,60.0);
     float ele_car_speed <- rnd(40.0,50.0);
     float day_hour <- (day_counter - 1) * 24.0 update: (day_counter - 1) * 24.0;
-    float bat_cons_max <- 0.15;
-    float bat_cons_min <- 0.1;
     bool half <- true;
-    int traveled_customer <- 0;
     list<int> CHARGING_RATES <- [250, 180, 150, 60, 30, 11];
-    float proba_home <- 0.6;
-    float proba_entertainment <- 0.4 * 0.2;
-    float proba_eat <- 0.4 * 0.3;
-    float proba_work <- 0.4 * 0.5;
 
     float mobility_rng_seed(int entity,int event_key) {
         float value <- abs(seed)+entity*1009.0+event_key*9176.0;
@@ -126,7 +111,6 @@ species vehicle skills: [driving] {
     float day_end <- rnd(20.0 + day_hour, 24.0 + day_hour);
     float taxi_end <- rnd(20.0 + day_hour, 24.0 + day_hour);
     int schedule_day <- day_counter;
-    int last_rush_activity_window <- -1;
     building home <- nil;
     bool day_end_time <- true;
     bool day_start_time <- false;
@@ -135,7 +119,6 @@ species vehicle skills: [driving] {
     bool is_work_car <- false;
     bool is_entertainment_car <- false;
     bool has_lunch <- false;
-    bool has_gone_out <- false;
     float wait_until <- -1.0;
     bool wait <- false;
     float entertain_time1 <- rnd(8.0 + day_hour, 11.0 + day_hour);
@@ -370,7 +353,6 @@ species car parent: vehicle {
 species building schedules: [] {
     intersection closest_intersection <- intersection closest_to self.location;
     string type;
-    int pollution_index;
     rgb color_outer_building;
     int build_type;
 }

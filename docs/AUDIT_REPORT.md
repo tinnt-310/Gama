@@ -1,3 +1,5 @@
+> Tài liệu lịch sử: mô tả nguồn trước nâng cấp. Đối chiếu tại Git checkpoint `5800181`; hướng dẫn hiện hành ở [GAMA Run Guide](GAMA_RANR_RUN_GUIDE_VI.md).
+
 # Full project audit — 8 October 2026
 
 Scope: runtime GAML modules, GIS initialization and display, charging/request lifecycle, coordination, mathematical solver/recovery, offline Python references, launchers, tests and handoff documents. Robot→EV remains deferred.

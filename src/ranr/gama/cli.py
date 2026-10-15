@@ -46,6 +46,13 @@ def main() -> None:
     dev.add_argument("--output", type=Path, default=OUTPUT / "development/release")
     dev.add_argument("--workers", type=int, default=1)
     dev.add_argument("--collect-only", action="store_true")
+    design = sub.add_parser("design-validation")
+    design.add_argument("--output",type=Path,default=OUTPUT/"design/release")
+    design.add_argument("--workers",type=int,default=1)
+    design.add_argument("--collect-only",action="store_true")
+    freeze = sub.add_parser("freeze-design")
+    freeze.add_argument("folder",type=Path)
+    freeze.add_argument("decision",type=Path)
     bench = sub.add_parser("benchmark")
     bench.add_argument("--output", type=Path, default=OUTPUT / "benchmark/release")
     bench.add_argument("--workers", type=int, nargs="+", default=[1, 2, 4])
@@ -76,7 +83,7 @@ def main() -> None:
     development.add_argument("--workers", type=int, default=1)
     args = p.parse_args()
     if args.command == "validate":
-        from ..legacy.scripts.check_gama import check_models, run_model
+        from .validation import check_models, run_model
 
         frozen = provenance()
         if args.compile:
@@ -88,10 +95,10 @@ def main() -> None:
             "RANR_SCIENTIFIC_PASS",
         )
         run_model(
-            "models/tests/RanrInformationTests.gaml",
-            "ranr_information",
+            "models/tests/RanrProtocolTests.gaml",
+            "ranr_protocol",
             1,
-            "RANR_INFORMATION_PASS",
+            "RANR_PROTOCOL_PASS",
         )
         run_model(
             "models/tests/RanrPhysicalTests.gaml",
@@ -111,6 +118,14 @@ def main() -> None:
             1,
             "RANR_SCENARIO_CACHE_PASS",
         )
+        for model, experiment, marker in [
+            ("RanrBehaviorTests.gaml", "ranr_behavior", "RANR_BEHAVIOR_PASS"),
+            ("RanrPortOutageTests.gaml", "ranr_port_outage", "RANR_PORT_OUTAGE_PASS"),
+            ("RanrDecisionTests.gaml", "ranr_decision", "RANR_DECISION_PASS"),
+            ("RanrObjectiveTests.gaml", "ranr_objective", "RANR_OBJECTIVE_PASS"),
+            ("RanrNetworkTests.gaml", "ranr_network", "RANR_NETWORK_PASS"),
+        ]:
+            run_model("models/tests/" + model, experiment, 8 if experiment=="ranr_port_outage" else 1, marker)
         for method in METHODS:
             run_model(
                 "models/tests/RanrFleetTests.gaml",
@@ -125,6 +140,11 @@ def main() -> None:
                     ),
                 },
             )
+        for count in (20,50,100,200):
+            run_model("models/tests/RanrBurstActivationTests.gaml","ranr_burst_activation",2,"RANR_BURST_ACTIVATION_PASS",{
+                "fixture_count":("INT",count),
+                "ranr_output":("STRING",str(OUTPUT/"validation_runs"/f"{time.time_ns()}_burst_{count}")),
+            })
         if provenance() != frozen:
             raise ValueError("GAMA source changed during validation; rerun validation")
         write_json(
@@ -135,6 +155,9 @@ def main() -> None:
                 "reference_fixtures_checked": True,
                 "compile_checked": args.compile,
                 "unified_fleet_checked": True,
+                "distributed_information_checked": True,
+                "objective_checked": True,
+                "simultaneous_bursts_checked": [20,50,100,200],
                 "development_validation_passed": False,
             },
         )
@@ -151,7 +174,15 @@ def main() -> None:
 
         training_report(args.folder)
         return
+    if args.command == "freeze-design":
+        from .design import freeze_design
+        print(json.dumps(freeze_design(args.folder,args.decision)))
+        return
     config = RunConfig.load(args.config)
+    if args.command == "design-validation":
+        from .design import validate_design
+        print(json.dumps(validate_design(config,args.output,args.workers,args.collect_only)))
+        return
     if args.command == "development-validation":
         from .development import development
 

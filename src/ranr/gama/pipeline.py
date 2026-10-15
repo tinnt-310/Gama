@@ -68,6 +68,7 @@ def jobs(
 
 
 def collect_calibration(folders: list[Path], target: Path) -> dict:
+    seen_runs = set()
     snapshots = []
     contexts = []
     release = []
@@ -75,7 +76,15 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
     rates = []
     background_rates = []
     eta_factors = []
+    arrival_trials = 0
+    observed_arrivals = 0
+    deadline_nonarrivals = []
+    context_tokens = set()
+    configurations = []
     for folder in folders:
+        folder = folder.resolve()
+        if folder in seen_runs: raise ValueError("Duplicate calibration run")
+        seen_runs.add(folder)
         record = json.loads((folder / "manifest.json").read_text())
         config = record["config"]
         if (
@@ -87,6 +96,9 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
         from .headless import checked_result
 
         checked_result(folder, {"source": provenance()})
+        shared={k:v for k,v in config.items() if k not in ("seed","render","timeout_seconds")}
+        if configurations and configurations[0]!=shared:raise ValueError("Inconsistent calibration configurations")
+        configurations.append(shared)
         previous_snapshots = len(snapshots)
         previous_contexts = len(contexts)
         for p, key, destination in [
@@ -108,12 +120,15 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
                 or len(hi) != len(powers)
             ):
                 raise ValueError("Invalid calibration snapshot dimensions")
-            if any(not math.isfinite(x) or x <= 0 for x in powers) or any(
+            if any(not math.isfinite(x) or x < 0 for x in powers) or any(
                 not math.isfinite(a) or not math.isfinite(b) or a < 0 or b < a
                 for a, b in zip(lo, hi)
             ):
                 raise ValueError("Invalid calibration snapshot values")
         for context in contexts[previous_contexts:]:
+            token=(str(folder),context.get("token",context.get("request_id")))
+            if token in context_tokens:raise ValueError("Duplicate calibration context")
+            context_tokens.add(token)
             if (
                 len(context.get("travel", [])) != 11
                 or not all(math.isfinite(x) and x >= -1 for x in context["travel"])
@@ -140,16 +155,24 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
             x["request_id"]: x
             for x in json.loads((folder / "outcomes.json").read_text())
         }
+        with (folder / "events.csv").open() as stream:
+            arrivals={}
+            for event in csv.DictReader(stream):
+                if event["terminal_record"]=="arrival":
+                    event_key=(event["request_id"],int(event.get("leg",0)))
+                    if event_key in arrivals:raise ValueError("Duplicate calibration arrival for request leg")
+                    arrivals[event_key]=float(event["time_min"])
         for context in contexts[previous_contexts:]:
-            outcome = outcomes.get(context.get("request_id", ""))
-            chosen = context.get("chosen", -1)
-            if (
-                outcome
-                and outcome["status"] == "completed"
-                and chosen >= 0
-                and context["travel"][chosen] > 1e-9
-            ):
-                eta_factors.append(outcome["travel_min"] / context["travel"][chosen])
+            chosen=context.get("chosen",-1)
+            if chosen<0 or context["travel"][chosen]<=1e-9:continue
+            arrival_trials+=1
+            event_key=(context.get("request_id",""),int(context.get("leg",0)))
+            issued=float(context.get("at",0.0))
+            if event_key in arrivals:
+                observed_arrivals+=1
+                eta_factors.append(max(1e-9,arrivals[event_key]-issued)/context["travel"][chosen])
+            else:
+                deadline_nonarrivals.append({"run":str(folder),"token":context.get("token",event_key[0]),"request_id":event_key[0],"leg":event_key[1]})
         rates.append(
             sum(x.get("participating", True) for x in contexts[previous_contexts:])
             / max(1, config["measure_minutes"])
@@ -176,8 +199,22 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
         # Deterministic stratified retention, never collapse to a single arbitrary state.
         chosen = np.linspace(0, len(pool) - 1, min(128, len(pool)), dtype=int)
         priors.extend(pool[i] for i in chosen)
+    response_prior = {}
+    for category in ("private", "taxi", "default"):
+        subset = [c for c in contexts if category == "default" or c.get("context") == category]
+        counts = np.array([1., 1., 1.])  # Declared Dirichlet smoothing, observable outcomes only.
+        for c in subset:
+            if c.get("chosen", -1) < 0: counts[2] += 1
+            elif c.get("chosen") == c.get("recommended"): counts[0] += 1
+            else: counts[1] += 1
+        values = counts / counts.sum()
+        response_prior[category] = dict(zip(("match", "other", "outside"), values.tolist()))
     result = {
-        "schema": "gama-calibration-v2",
+        "schema": "gama-calibration-v3",
+        "objective_version": "opportunity-service-3",
+        "observation_version": "station-observation-3",
+        "response_prior": response_prior,
+        "response_identification": "P(observed destination class | offer, category), not latent compliance; Dirichlet(1,1,1)",
         "environment_version": ENVIRONMENT_VERSION,
         "backend": "GAMA",
         "split": "train",
@@ -188,10 +225,14 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
         "energy_samples": [x["energy"] for x in contexts],
         "prior_snapshots": priors,
         "arrival_prior": [
-            {k: c[k] for k in ["issuer", "travel", "energy", "max_kw"]}
+            {k: c.get(k, "default" if k == "context" else None) for k in ["issuer", "travel", "energy", "max_kw", "context"]}
             for c in contexts
         ],
         "eta_factors": eta_factors,
+        "eta_population": "all observed arrival legs, independent of charging completion",
+        "arrival_probability": (observed_arrivals+1)/(arrival_trials+2),
+        "arrival_probability_prior": "Beta(1,1), arrival before request termination conditional on a declared destination",
+        "deadline_nonarrivals": deadline_nonarrivals,
         "request_rate": float(np.mean(rates)),
         "background_rate": float(np.mean(background_rates)),
     }
@@ -219,9 +260,16 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
         "wall_seconds",
         "communication_bytes",
     ]
+    # Flatten numerical GAMA objective components for seed-level confidence intervals.
+    for row in rows:
+        for name,value in row.get("objective_components",{}).items():
+            if isinstance(value,(int,float)) and not isinstance(value,bool): row["objective_"+name]=value
+    metrics.extend(sorted({key for row in rows for key in row if key.startswith("objective_") and isinstance(row[key],(int,float))}))
     metrics += [
         name
         for name in (
+            "mean_completed_time_min", "mean_time_per_opportunity_min", "measurement_opportunity_count",
+            "mean_charging_min", "recommendation_latency_mean_ms", "recommendation_latency_p95_ms", "recommendation_latency_max_ms", "event_broadcasts", "periodic_broadcasts", "duplicate_packets", "received_information_age_min", "prediction_service_start_mae_min", "prediction_p95_coverage",
             "unserved_kwh",
             "served_energy_fraction",
             "load_balance_cv",
