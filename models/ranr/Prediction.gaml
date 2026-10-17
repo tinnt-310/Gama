@@ -19,7 +19,7 @@ global {
                     if ranr_uniform(327,entity,draw)>ranr_arrival_probability { continue; }
                     int chosen <- ranr_categorical(mass,ranr_uniform(301,entity,draw));
                     if chosen>=length(travel) { continue; }
-                    float factor <- ranr_eta_factor(entity,draw);
+                    float factor <- ranr_eta_factor(entity:entity,draw:draw);
                     if "snapshots" in observation.keys {
                         list<map<string,unknown>> states <- observation["snapshots"];
                         map<string,unknown> candidate <- states[chosen];
@@ -37,7 +37,7 @@ global {
                     }
                     float absolute <- float(cohort["issued"])+factor*travel[chosen];
                     if absolute > origin+1e-10 and absolute <= end_at {
-                        arrivals << ["sid"::chosen,"at"::absolute,"energy"::cohort["energy"],"max_kw"::cohort["max_kw"],"deadline"::(float(cohort["issued"])+ranr_deadline),"probe"::false];
+                        arrivals << ["sid"::chosen,"at"::absolute,"energy"::("energy_by_station" in cohort.keys ? list<float>(cohort["energy_by_station"])[chosen] : float(cohort["energy"])),"max_kw"::cohort["max_kw"],"service_until"::1e100,"probe"::false];
                     }
                 }
             }
@@ -48,7 +48,7 @@ global {
         list<float> rates <- list<float>(observation["rates"]);
         loop stream over: ["unseen_foreground","background"] {
         loop issuer from: 0 to: length(rates)-1 {
-            float begin_at <- stream="background" ? now : max(0.0,max(now-ranr_deadline,marks[issuer]));
+            float begin_at <- stream="background" ? now : max(0.0,max(now-ranr_arrival_lookback,marks[issuer]));
             float rate <- rates[issuer];
             float stop_at <- stream="background" ? min(end_at,ranr_warmup+ranr_measure) : now;
             float issuance <- begin_at; int event_index <- 0;
@@ -66,9 +66,9 @@ global {
                 if ranr_uniform(328,entity,draw)>ranr_arrival_probability { continue; }
                 int chosen <- ranr_categorical(mass,ranr_uniform(313,entity,draw));
                 if chosen>=length(travel) { continue; }
-                float absolute <- issuance+travel[chosen]*(ranr_eta_factor(entity,draw+1000000));
+                float absolute <- issuance+travel[chosen]*(ranr_eta_factor(entity:entity,draw:draw+1000000));
                 if absolute > origin and absolute <= end_at {
-                    arrivals << ["sid"::chosen,"at"::absolute,"energy"::context["energy"],"max_kw"::context["max_kw"],"deadline"::(issuance+ranr_deadline),"probe"::false];
+                    arrivals << ["sid"::chosen,"at"::absolute,"energy"::("energy_by_station" in context.keys ? list<float>(context["energy_by_station"])[chosen] : float(context["energy"])),"max_kw"::context["max_kw"],"service_until"::1e100,"probe"::false];
                 }
             }
         }
@@ -78,7 +78,7 @@ global {
             loop resolution over:list<map<string,unknown>>(observation["resolutions"]) {
                 float arrived <- "arrival_at" in resolution.keys ? float(resolution["arrival_at"]) : float(resolution["at"]);
                 if (resolution["status"]="arrived" or "arrival_at" in resolution.keys) and "energy" in resolution.keys and arrived>origin and arrived<=now {
-                    arrivals << ["sid"::resolution["source"],"at"::arrived,"energy"::resolution["energy"],"max_kw"::resolution["max_kw"],"deadline"::(resolution["status"]="cancelled" ? min(float(resolution["deadline"]),float(resolution["at"])) : float(resolution["deadline"])),"probe"::false];
+                    arrivals << ["sid"::resolution["source"],"at"::arrived,"energy"::resolution["energy"],"max_kw"::resolution["max_kw"],"service_until"::(resolution["status"]="cancelled" ? min(("service_until" in resolution.keys ? float(resolution["service_until"]) : 1e100),float(resolution["at"])) : ("service_until" in resolution.keys ? float(resolution["service_until"]) : 1e100)),"probe"::false];
                 }
             }
         }
@@ -93,7 +93,7 @@ global {
         float origin <- float(snapshot["issued"]); int target <- int(snapshot["sid"]);
         loop job over: absolute {
             if int(job["sid"])!=target or float(job["at"])<=origin { continue; }
-            map<string,unknown> shifted <- ranr_record(job); shifted["at"] <- float(job["at"])-origin; shifted["deadline"] <- float(job["deadline"])-origin;
+            map<string,unknown> shifted <- ranr_record(job); shifted["at"] <- float(job["at"])-origin; shifted["service_until"] <- ("service_until" in job.keys ? float(job["service_until"]) : 1e100)-origin;
             result << shifted;
         }
         return result;
@@ -105,6 +105,7 @@ global {
         if cache_key!=ranr_scenario_cache_key { ranr_scenario_cache <- []; ranr_scenario_cache_key <- cache_key; }
         list<float> waits <- []; list<float> externalities <- []; list<float> charges <- []; list<float> workloads <- [];
         int sid <- int(supplied_snapshot["sid"]); int entity <- int(request["key"]);
+        if "energy_by_station" in request.keys { request <- ranr_record(request); request["energy"] <- list<float>(request["energy_by_station"])[sid]; }
         loop sample from: 0 to: ranr_samples-1 {
             map<string,unknown> snapshot <- supplied_snapshot;
             if string(snapshot["source"])="prior" {
@@ -123,32 +124,32 @@ global {
             loop job over: queued {
                 int selected <- min(length(ranr_energy_fractions)-1,int(ranr_uniform(322,entity*4099+sample,sid*1000+length(jobs))*length(ranr_energy_fractions)));
                 float energy <- float(job["low"])+(float(job["high"])-float(job["low"]))*ranr_energy_fractions[selected];
-                float deadline <- "deadline" in job.keys ? float(job["deadline"]) : ranr_deadline;
+                float service_until <- "service_until" in job.keys ? float(job["service_until"]) : 1e100;
                 if "token" in job.keys and "resolutions" in observation.keys {
                     loop resolution over:list<map<string,unknown>>(observation["resolutions"]) {
-                        if resolution["token"]=job["token"] and resolution["status"]="cancelled" { deadline <- min(deadline,max(0.0,float(resolution["at"])-float(snapshot["issued"]))); }
+                        if resolution["token"]=job["token"] and resolution["status"]="cancelled" { service_until <- min(service_until,max(0.0,float(resolution["at"])-float(snapshot["issued"]))); }
                     }
                 }
-                jobs << ["at"::0.0,"energy"::energy,"max_kw"::job["max_kw"],"deadline"::deadline,"probe"::false];
+                jobs << ["at"::0.0,"energy"::energy,"max_kw"::job["max_kw"],"service_until"::service_until,"probe"::false];
             }
             float eta <- 0.0;
             if ranr_method!="No-Prediction" {
                 float age <- string(supplied_snapshot["source"])="prior" ? 0.0 : max(0.0,float(observation["at"])-float(snapshot["issued"]));
-                eta <- age+list<float>(request["travel"])[sid]*(ranr_eta_factor(entity,sample));
+                eta <- age+list<float>(request["travel"])[sid]*(ranr_eta_factor(entity:entity,draw:sample));
                 jobs <- jobs+ranr_future(snapshot,observation,request,sample);
             }
-            float remaining_deadline <- "remaining_deadline" in request.keys ? float(request["remaining_deadline"]) : ranr_deadline;
-            map<string,unknown> probe <- ["at"::eta,"energy"::request["energy"],"max_kw"::request["max_kw"],"deadline"::(ranr_method="No-Prediction" ? remaining_deadline : max(0.0,float(observation["at"])-float(snapshot["issued"]))+remaining_deadline),"probe"::true];
+            float remaining_observation <- "remaining_observation" in request.keys ? float(request["remaining_observation"]) : 1e100;
+            map<string,unknown> probe <- ["at"::eta,"energy"::request["energy"],"max_kw"::request["max_kw"],"service_until"::1e100,"probe"::true];
             list<map<string,unknown>> with_probe <- (jobs+[probe]) sort_by float(each["at"]);
             int probe_index <- with_probe index_of probe;
-            map<string,unknown> inserted <- ranr_shadow(powers,releases,with_probe);
+            map<string,unknown> inserted <- ranr_shadow_limited(powers,releases,with_probe,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
             float waiting <- list<float>(inserted["waits"])[probe_index]; waits << waiting;
             charges << (list<float>(inserted["nominal_services"])[probe_index]>0.0 ? list<float>(inserted["nominal_services"])[probe_index] : 60.0*float(request["energy"])/(charge_efficiency*max(1e-9,min(max(powers),float(request["max_kw"])))));
             workloads << sum(jobs collect float(each["energy"]));
             if ranr_method="No-Prediction" { externalities << 0.0; }
             else {
                 float counter_started <- machine_time;
-                map<string,unknown> baseline <- ranr_shadow(powers,releases,jobs);
+                map<string,unknown> baseline <- ranr_shadow_limited(powers,releases,jobs,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
                 externalities << float(inserted["total"])-waiting-float(baseline["total"]);
                 ranr_externality_ms <- ranr_externality_ms+machine_time-counter_started;
             }
@@ -157,7 +158,7 @@ global {
         float spread <- sqrt(mean(waits collect ((each-mean_wait)^2)));
         float age <- string(supplied_snapshot["source"])="prior" ? ranr_ttl : max(0.0,float(observation["at"])-float(supplied_snapshot["issued"]));
         ranr_prediction_ms <- ranr_prediction_ms+machine_time-started;
-        return ["mean"::mean_wait,"raw_mean"::mean_wait,"charge"::mean(charges),"workload_kwh"::mean(workloads),"congestion_probability"::(float(length(waits where (each>5.0)))/length(waits)),"p95"::ranr_quantile(waits,0.95),"externality"::mean(externalities),
+        return ["mean"::mean_wait,"raw_mean"::mean_wait,"charge"::mean(charges),"workload_kwh"::mean(workloads),"congestion_probability"::(float(length(waits where (each>5.0)))/length(waits)),"p95"::ranr_quantile(values:waits,probability:0.95),"externality"::mean(externalities),
             "raw_externality"::mean(externalities),"uncertainty"::(spread+min(age,ranr_ttl)),
             "source"::(ranr_method="No-Prediction" ? "snapshot_fifo_zero" : string(supplied_snapshot["source"]))];
     }

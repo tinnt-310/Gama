@@ -1,0 +1,40 @@
+{
+  "objective_version": "intent-service-5",
+  "lifecycle_schema": 5,
+  "outcome_schema": 5,
+  "deadline_minutes": 360.0,
+  "step_seconds": 60.0,
+  "warmup_minutes": 360.0,
+  "measure_minutes": 3600.0,
+  "drain_minutes": 360.0,
+  "cohort": "intent.created_at in [warmup,warmup+measurement)",
+  "exposure": "planned electric vehicle presence overlap Measurement / 1440; include blocked entrants",
+  "priority": [
+    "unique_stranded_ev_per_evday",
+    "unserved_planned_activity_per_evday",
+    "not_on_time_intent_per_evday",
+    "unmet_kwh_at_observation_end_per_evday",
+    "operational_objective"
+  ],
+  "operational_weights": [
+    0.5,
+    0.3,
+    0.2
+  ],
+  "time_normalization_minutes": 360.0,
+  "completion_time": "actual completion minus intent creation, completed intents only",
+  "waiting": "sum unique physical queue intervals per intent with >=1 arrival; observed censored intervals retained",
+  "queue_pressure": "max Measurement+Drain E_wait/(E_wait+6*P_eff); P_eff=all physical backlog battery energy / frozen-state FIFO clearing hours; busy ports and noncohort workload included",
+  "zero_capacity_pressure": 1.0,
+  "censoring": "unresolved retains observed intervals and energy; incomplete required Drain invalidates fitness",
+  "unmet_energy_time": "completion for completed intents, observation end for incomplete intents",
+  "energy_abs_tol_kwh": 1e-06,
+  "energy_rel_tol": 1e-08,
+  "time_tol_min": 1e-07,
+  "soc_tol_percent": 1e-06,
+  "validation_relative_improvement": 0.01,
+  "taper": "piecewise constant acceptance multiplier; default flat",
+  "power_allocation": "port/EV capped, station total power proportional scaling; reallocate at completion/taper boundary",
+  "mobility_cohort": "planned activity scheduled in Measurement; observe through Drain; taxi existing shift rules",
+  "stranded_cohort": "EVs with planned Measurement presence, stranding observed from episode start through Drain"
+}

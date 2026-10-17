@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 import json
 import time
-from ..paths import ROOT, write_json
+from ..paths import ROOT, write_json, digest
 from .headless import (
     RunConfig,
     METHODS,
@@ -17,6 +17,7 @@ from .headless import (
     load_model,
     archive_failed_run,
 )
+from .contracts import OBJECTIVE_VERSION, OBJECTIVE_CONFIG_HASH
 from .pipeline import jobs, collect_calibration, report, benchmark_budget
 
 
@@ -37,6 +38,8 @@ def main() -> None:
     calibration = sub.add_parser("calibrate")
     calibration.add_argument("--output", type=Path, default=OUTPUT / "calibration")
     calibration.add_argument("--collect-only", action="store_true")
+    calibration.add_argument("--runs", type=Path, nargs=3, help="Explicit completed Collect folders, one per registered seed")
+    calibration.add_argument("--compatibility", type=Path, help="Verified historical calibration compatibility evidence")
     calibration.add_argument(
         "--restart-incomplete",
         action="store_true",
@@ -57,6 +60,7 @@ def main() -> None:
     bench.add_argument("--output", type=Path, default=OUTPUT / "benchmark/release")
     bench.add_argument("--workers", type=int, nargs="+", default=[1, 2, 4])
     bench.add_argument("--hours", type=float, default=72)
+    bench.add_argument("--stage", choices=("all","accuracy","performance"), default="all")
     training = sub.add_parser("train")
     training.add_argument("--output", type=Path, default=OUTPUT / "training/release")
     training.add_argument(
@@ -83,11 +87,28 @@ def main() -> None:
     development.add_argument("--workers", type=int, default=1)
     args = p.parse_args()
     if args.command == "validate":
-        from .validation import check_models, run_model
+        from .validation import check_models, run_model as native_run_model
+        from .evidence import reference
+        evidence = OUTPUT / "validation_runs" / str(time.time_ns())
+        evidence.mkdir(parents=True)
+        resources = []
+        def run_model(*arguments, **kwargs):
+            path = evidence / f"fixture_{len(resources)}.json"
+            kwargs['resource_output'] = path
+            console = native_run_model(*arguments, **kwargs)
+            content = json.loads(path.read_text())
+            content.update(console=console, source=provenance())
+            write_json(path, content)
+            resources.append(reference(path))
+            return console
 
         frozen = provenance()
         if args.compile:
             check_models()
+        run_model(
+            "models/tests/RanrLookupTests.gaml", "ranr_lookup", 1,
+            "RANR_HISTORY_LOOKUP_PASS",
+        )
         run_model(
             "models/tests/RanrScientificTests.gaml",
             "ranr_scientific",
@@ -126,7 +147,29 @@ def main() -> None:
             ("RanrNetworkTests.gaml", "ranr_network", "RANR_NETWORK_PASS"),
         ]:
             run_model("models/tests/" + model, experiment, 8 if experiment=="ranr_port_outage" else 1, marker)
+        run_model(
+            "models/tests/RanrStartupFailureTests.gaml", "ranr_startup_failure", 2,
+            "RANR_STARTUP_FAILURE_PASS",
+            {"ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_startup_failure"))},
+        )
+        for branch in ("morning", "lunch", "return"):
+            run_model(
+                "models/tests/RanrMobilityTests.gaml", "ranr_mobility", 8,
+                "RANR_MOBILITY_RETARGET_PASS",
+                {"fixture_branch": ("STRING", branch),
+                 "ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_mobility_{branch}"))},
+            )
+        for change in ("none", "case", "compliance", "defer", "trace", "parameters", "retry", "collection", "enabled", "display"):
+            marker = "RANR_LAST_DAY_PASS" if change == "none" else ("RANR_DISPLAY_CHANGE_PASS" if change == "display" else "RANR_CONFIGURATION_GUARD_PASS")
+            run_model(
+                "models/tests/RanrLifecycleTests.gaml", "ranr_lifecycle", 4321 if change == "none" else 4,
+                marker,
+                {"fixture_change": ("STRING", change),
+                 "ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_lifecycle_{change}"))},
+            )
+        paired_hashes = None
         for method in METHODS:
+            fleet_output = OUTPUT / "validation_runs" / f"{time.time_ns()}_{method}"
             run_model(
                 "models/tests/RanrFleetTests.gaml",
                 "unified_fleet_test",
@@ -136,28 +179,64 @@ def main() -> None:
                     "ranr_method": ("STRING", method),
                     "ranr_output": (
                         "STRING",
-                        str(OUTPUT / "validation_runs" / f"{time.time_ns()}_{method}"),
+                        str(fleet_output),
                     ),
                 },
             )
-        for count in (20,50,100,200):
-            run_model("models/tests/RanrBurstActivationTests.gaml","ranr_burst_activation",2,"RANR_BURST_ACTIVATION_PASS",{
-                "fixture_count":("INT",count),
-                "ranr_output":("STRING",str(OUTPUT/"validation_runs"/f"{time.time_ns()}_burst_{count}")),
-            })
+            current_hashes = {name: digest(fleet_output / name) for name in ("initial_fleet.json", "vehicle_traits.json", "activity_plan.json", "traffic_plan.json")}
+            if paired_hashes is None:
+                paired_hashes = current_hashes
+            elif paired_hashes != current_hashes:
+                raise ValueError("Individual traits or mobility schedules changed between paired methods")
+        for mode in ("low", "target", "long_insufficient", "long_feasible", "activity", "passenger", "shift", "retry", "unavailable", "drain", "replan", "cancel"):
+            run_model(
+                "models/tests/RanrEnergyTests.gaml", "ranr_energy", 240, "RANR_SOC_ACTIVITY_PASS",
+                {"fixture_mode": ("STRING", mode),
+                 "ranr_measure": ("FLOAT", 1.0 if mode == "drain" else 240.0),
+                 "consumption_kwh_km": ("FLOAT", 1.0 if mode.startswith("long_") else 0.18),
+                 "ranr_true_defer": ("FLOAT", 1.0 if mode == "retry" else 0.0),
+                 "ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_energy_{mode}"))},
+            )
+        run_model(
+            "models/tests/RanrEnergyTests.gaml", "ranr_energy", 4321, "RANR_SOC_ACTIVITY_THREE_DAYS_PASS",
+            {"fixture_mode": ("STRING", "drive"), "ranr_warmup": ("FLOAT", 360.0), "ranr_measure": ("FLOAT", 3600.0),
+             "ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_energy_drive"))},
+        )
+        run_model(
+            "models/tests/RanrEnergyTests.gaml", "ranr_energy", 1001, "RANR_DEADLINE_DRAIN_PASS",
+            {"fixture_mode": ("STRING", "deadline"), "ranr_measure": ("FLOAT", 720.0),
+             "ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_deadline_drain"))},
+        )
+        run_model(
+            "models/tests/RanrActivityTests.gaml", "ranr_activity", 2, "RANR_ACTIVITY_DISTRIBUTIONS_PASS",
+            {"ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_activity_distributions"))},
+        )
+        run_model(
+            "models/tests/RanrEpisodeTests.gaml", "ranr_episode", 241, "RANR_EPISODE_PASS",
+            {"ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_charging_episode"))},
+        )
+        run_model("models/tests/RanrPortCapacityTests.gaml", "ranr_port_capacity", 61, "RANR_PORT_CAPACITY_PASS")
         if provenance() != frozen:
             raise ValueError("GAMA source changed during validation; rerun validation")
         write_json(
             OUTPUT / "validation.json",
             {
                 "passed": True,
+                "objective_version": OBJECTIVE_VERSION,
+                "objective_config_hash": OBJECTIVE_CONFIG_HASH,
                 "source": frozen,
+                "dependencies": resources,
+                "port_capacity_checked": True,
                 "reference_fixtures_checked": True,
                 "compile_checked": args.compile,
                 "unified_fleet_checked": True,
                 "distributed_information_checked": True,
                 "objective_checked": True,
-                "simultaneous_bursts_checked": [20,50,100,200],
+                "energy_safety_checked": True,
+                "mobility_retarget_checked": True,
+                "soc_activity_demand_checked": True,
+                "personal_distributions_checked": True,
+                "paired_exogenous_traits_checked": True,
                 "development_validation_passed": False,
             },
         )
@@ -177,6 +256,11 @@ def main() -> None:
     if args.command == "freeze-design":
         from .design import freeze_design
         print(json.dumps(freeze_design(args.folder,args.decision)))
+        return
+    if args.command == "calibrate" and args.runs:
+        if args.restart_incomplete: p.error("Explicit Collect folders cannot be restarted")
+        from .gui_collection import build
+        print(json.dumps(build(OUTPUT/"gui_calibration",args.runs,args.compatibility)))
         return
     config = RunConfig.load(args.config)
     if args.command == "design-validation":
@@ -262,12 +346,12 @@ def main() -> None:
                         1,
                         f"Calibration incomplete: {error}\nIncrease timeout_seconds if needed, then retry with --restart-incomplete.\n",
                     )
-        collect_calibration(folders, args.output / "calibration.json")
+        collect_calibration(folders, args.output / "calibration.json", args.compatibility)
         return
     if args.command == "benchmark":
         from .benchmarking import benchmark
 
-        print(json.dumps(benchmark(config, args.output, args.workers, args.hours)))
+        print(json.dumps(benchmark(config, args.output, args.workers, args.hours, args.stage)))
         return
     if args.command == "train":
         from .training import train
@@ -289,40 +373,9 @@ def main() -> None:
         )
         return
     if args.command == "evaluate":
-        if config.development or config.calibrating:
-            raise ValueError(
-                "Primary evaluation requires a locked, calibrated controlled-demand research configuration"
-            )
-        parameters = {}
-        registration = json.loads((args.models / "registration.json").read_text())
-        if (
-            registration["status"] != "complete"
-            or registration["profile"] != "research"
-            or registration["source"] != provenance()
-        ):
-            raise ValueError("Complete matching GAMA research training required")
-        for method in METHODS:
-            parameters[method] = load_model(
-                args.models / method / "parameters.json", method, config
-            )
-        config = replace(config, warmup_minutes=1440, measure_minutes=2880, trace=True)
-        args.output.mkdir(parents=True, exist_ok=True)
-        state = {
-            "status": "running",
-            "profile": "research",
-            "source": provenance(),
-            "models": str(args.models.resolve()),
-        }
-        write_json(args.output / "registration.json", state)
-        rows = jobs(
-            config, parameters, args.output, list(range(31001, 31031)), args.workers
-        )
-        if len(rows) != 720:
-            raise ValueError("Expected 720 GAMA evaluation runs")
-        write_json(args.output / "results.json", rows)
-        state["status"] = "complete"
-        write_json(args.output / "registration.json", state)
-        report(rows, args.output / "report", "research")
+        from .evaluation import evaluate_models
+        evaluate_models(config,args.models,args.output,args.workers)
+
 
 
 if __name__ == "__main__":

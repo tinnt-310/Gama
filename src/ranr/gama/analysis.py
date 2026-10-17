@@ -13,78 +13,8 @@ from .contracts import rescore_components
 
 
 def sensitivity(config: RunConfig, folder: Path, models: Path, workers: int) -> None:
-    """Vary deadlines in GAMA; re-score unchanged outcomes for penalty factors."""
-    parameters = {
-        method: load_model(models / method / "parameters.json", method, config)
-        for method in METHODS
-    }
-    identity = {
-        "source": provenance(),
-        "config": asdict(config),
-        "models": {
-            method: digest(models / method / "parameters.json") for method in METHODS
-        },
-        "profile": "development_sensitivity",
-        "deadlines": [180, 360, 720],
-        "penalty_factors": [0.5, 1.0, 2.0],
-        "seeds": [23001, 23002, 23003],
-    }
-    registration = folder / "registration.json"
-    if registration.exists():
-        old = json.loads(registration.read_text())
-        if any(old.get(k) != v for k, v in identity.items()):
-            raise ValueError("Sensitivity inputs changed; use a new output directory")
-    write_json(registration, {**identity, "status": "running"})
-    rescored = []
-    for deadline in identity["deadlines"]:
-        c = replace(
-            config,
-            development=True,
-            deadline_minutes=deadline,
-            warmup_minutes=1440,
-            measure_minutes=2880,
-            trace=True,
-        )
-        target = folder / str(deadline)
-        rows = jobs(
-            c, parameters, target, identity["seeds"], workers, cases=("normal", "high")
-        )
-        write_json(target / "results.json", rows)
-        for row in rows:
-            source = target / "runs" / row["case"] / str(row["seed"]) / row["method"]
-            outcomes = [
-                x
-                for x in json.loads((source / "outcomes.json").read_text())
-                if x["measured"]
-            ]
-            for factor in identity["penalty_factors"]:
-                objective = rescore_components(row["objective_components"], factor, factor)
-                if factor == 1 and abs(objective - row["objective"]) > 1e-6:
-                    raise ValueError(
-                        "Sensitivity re-scoring differs from GAMA objective"
-                    )
-                rescored.append(
-                    {
-                        **row,
-                        "deadline_minutes": deadline,
-                        "penalty_factor": factor,
-                        "objective": objective,
-                    }
-                )
-    write_json(folder / "results.json", rescored)
-    for deadline in identity["deadlines"]:
-        for factor in identity["penalty_factors"]:
-            report(
-                [
-                    r
-                    for r in rescored
-                    if r["deadline_minutes"] == deadline
-                    and r["penalty_factor"] == factor
-                ],
-                folder / "report" / str(deadline) / str(factor),
-                "development_sensitivity",
-            )
-    write_json(registration, {**identity, "status": "complete"})
+    """The registered lexicographic design cannot be rescored with scalar betas."""
+    raise ValueError("Scalar penalty/deadline sensitivity is obsolete. Use registered objective dominance regression and paired design validation.")
 
 
 def training_report(folder: Path) -> None:
@@ -104,9 +34,10 @@ def training_report(folder: Path) -> None:
         "method",
         "optimizer_seed",
         "evaluations",
-        "short_best",
-        "short_mean",
-        "long_validation",
+        "fitness_vector",
+        "generation_rank",
+        "operational_objective",
+        "validation_fitness_vector",
         "rollouts",
         "validation_rollouts",
         "cpu_seconds",
@@ -130,17 +61,17 @@ def training_report(folder: Path) -> None:
                 for r in rows
                 if r["method"] == method
                 and r["optimizer_seed"] == seed
-                and r["long_validation"] is not None
+                and r.get("validation_fitness_vector") is not None
             ]
             if selected:
                 ax.plot(
                     [r["evaluations"] for r in selected],
-                    [r["long_validation"] for r in selected],
+                    [r["validation_fitness_vector"][4] for r in selected],
                     label=f"{method} / {seed}",
                     marker=".",
                 )
     ax.set_xlabel("Candidate evaluations / optimizer seed")
-    ax.set_ylabel("Long-validation objective")
+    ax.set_ylabel("Operational component on fixed validation set (service priorities reported in CSV)")
     ax.legend(fontsize=6)
     fig.tight_layout()
     for extension in ("pdf", "svg"):

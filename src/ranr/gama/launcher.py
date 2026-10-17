@@ -10,6 +10,9 @@ from ranr.paths import ROOT
 
 def run(args):
     installation = Path(os.environ.get("GAMA_HOME", "/opt/gama-platform")).resolve()
+    heap = int(os.environ.get("RANR_JAVA_HEAP_MIB", "2048"))
+    if not 512 <= heap <= 24576:
+        raise ValueError("RANR_JAVA_HEAP_MIB must be between 512 and 24576")
     with tempfile.TemporaryDirectory(prefix="evstation-gama-") as tmp:
         base = Path(tmp)
         configuration = base / "configuration"
@@ -76,7 +79,7 @@ def run(args):
         cmd = [
             str(installation / "jdk/bin/java"),
             "-Xms128m",
-            "-Xmx2048m",
+            f"-Xmx{heap}m",
             "-Djava.awt.headless=true",
             f"-Djava.util.prefs.userRoot={base}/prefs",
             f"-Djava.util.prefs.systemRoot={base}/systemprefs",

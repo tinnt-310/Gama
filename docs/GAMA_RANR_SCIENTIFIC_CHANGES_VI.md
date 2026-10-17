@@ -1,23 +1,23 @@
 # Hồ sơ thay đổi khoa học RANR-AW
 
-Phiên bản môi trường `persistent-controlled-distributed-3`; observation `station-observation-3`, packet `peer-packet-3`, objective `opportunity-service-3`, model `gama-ranr-v3`, calibration `gama-calibration-v3`. Đây là thay đổi tại chỗ; checkpoint `5800181` bảo toàn công thức và triển khai trước.
+Phiên bản môi trường `persistent-soc-activity-6`; observation `station-observation-4`, packet `peer-packet-3`, objective `intent-service-5`, model `gama-ranr-v4`, calibration `gama-calibration-v4`. Đây là thay đổi tại chỗ; checkpoint `5800181` bảo toàn công thức và triển khai trước.
 
 | Thành phần | Trước / vấn đề | Quyết định hiện hành / giả định | Bằng chứng cần đọc |
 |---|---|---|---|
-| Physical model | Hai hệ thuật toán cùng import, nhiều công tắc legacy | Một fleet 3000 car +1000 private EV +700 taxi; opportunities hiện hữu; inbound tối đa 900/300/210 | Fleet, physical, burst fixtures; development dài còn chờ |
+| Physical model | Hai hệ thuật toán cùng import, nhiều công tắc legacy | Một fleet 3000 car +1000 private EV +700 taxi; intent phát sinh từ SOC/lịch hoạt động; inbound tối đa 900/300/210 | Fleet, physical, SOC/activity fixtures; development dài còn chờ |
 | Observation | Local/peer dùng snapshot có cùng độ rộng cố định | Local chính xác của chính trạm; packet sao chép timestamp/version; độ chính xác peer công bố như nhau giữa phương pháp | Protocol, decision và network fixtures |
 | Exposure | Cohort theo bucket, thiếu feedback/acknowledgement | Mỗi cohort một token request-leg, count=1; version, context, bucket, ETA, energy, expiry; resolution có nguồn | Retry, cancellation, expiry; chưa khẳng định độ chính xác ngoài thực nghiệm |
 | Reconciliation | Survival ETA đơn thuần | Arrival trình token được ghép theo giao thức; arrival không token dùng Bayes với mô hình other arrivals Poisson | Pure posterior tests; xấp xỉ mean-field cần development validation |
 | Arrivals dự báo | Background và unseen có khoảng issuance chồng nhau | Exposure đã biết; unseen issuance trong khoảng thiếu tin trước t; background issuance sau t | Scenario fixtures, audit khoảng thời gian |
 | Cost T | Travel đơn thuần | Travel + expected charging duration, không cộng waiting | Decision fixture với cổng 60/120 kW |
 | Feasibility | Tuyến và 3 kWh hard-code | GIS route, energy +5% battery reserve, connector, operating/capacity đã biết | Decision và physical fixtures |
-| No-Prediction | Snapshot estimator giữ 5 criteria | Giữ nguyên 5 logits; H=0 theo FIFO và independent ports; không thêm arrivals/tiến ETA | Scientific fixture; future_calls=0 |
-| Behavior | 20% bypass hard-code, calibration không có offers | Mọi activation có offer; EV tự chọn. Calibration thăm dò xác suất đã đăng ký; K_hat từ observable response classes | Protocol, collection unit tests; dữ liệu thực dài còn thiếu |
+| No-Prediction | Snapshot estimator giữ 5 criteria | Giữ nguyên 5 logits; H=0 theo định nghĩa ablation; vật lý vẫn xét giới hạn công suất trạm; không thêm arrivals/tiến ETA | Scientific fixture; future_calls=0 |
+| Behavior | 20% bypass hard-code, calibration không có offers | Mọi request hợp lệ có offer; EV tự chọn. Calibration thăm dò xác suất đã đăng ký; K_hat từ observable response classes | Protocol, collection unit tests; dữ liệu thực dài còn thiếu |
 | P2P | Periodic + phát sau mọi offer | Heartbeat + event triggers cùng transport; batching/min interval, duplicate/reorder/partition/recovery | Network fixture; overhead logs |
 | Stability | Chưa có experiment có kiểm soát | Off mặc định; forecast-only smoothing/hysteresis, invalidation khi critical/expired/escalation | Decision fixture; hiệu quả vận hành chưa đo |
 | Outcome | Failed/deferred/unserved gộp | Terminal loại trừ nhau; ineligible no-need tách khỏi failure; ledger opportunity đầy đủ | Objective/contract fixtures |
 | Objective | T*/W* với D(I+u), không có charging duration | Công thức phân rã dưới đây; bỏ phạt gộp cũ | Objective fixture và analysis checks |
-| Training | Chỉ gate benchmark/physical | Thêm design freeze, objective sensitivity và distributed evidence; tối đa72h gồm design-validation allowance | Orchestration tests; chưa training |
+| Training | Chỉ gate benchmark/physical | Thêm design freeze, objective sensitivity và distributed evidence; tối đa 72 giờ riêng training; các giai đoạn khác tính riêng | Orchestration tests; chưa training |
 
 ## Công thức cost và weights
 
@@ -35,19 +35,33 @@ Với arrival không token, giả định `B~Bernoulli(p)`, `O~Poisson(lambda)`,
 
 D_background gồm issuance tương lai chưa phát sinh; D_unseen gồm issuance quá khứ sau watermark chưa nhận; D_exposure gồm offer đã nhận còn outstanding. Một exposure sample chỉ chọn một đích hoặc outside. Không đọc opportunity manifest trong predictor.
 
-## Objective chính thức và development coefficients
+## Objective chính thức: intent-service-5
 
-`L = .5*sum(service_time)/(N_opp*D) + .3*P95(wait)/D + .2*peak_station_queue/125 + beta*sum(N_failure)/N_opp + beta_E*unmet_kWh/requested_kWh`.
+GAMA trả fitness vector theo thứ tự ưu tiên lexicographic:
 
-Service time = travel + waiting + charging elapsed; hoàn thành bằng completion time vật lý, terminal chưa hoàn thành dùng phần thời gian đã phát sinh. Outage pause trong charging được tính vào elapsed; active charging/energy vẫn theo công suất vật lý. Mean và P95 waiting conditional trên activated/completed được báo riêng. Queue peak chỉ đo trong cửa sổ chính; outcomes tiếp tục settle tới deadline.
+`[unique_stranded / E, mobility_unserved / E, not_on_time / E, unmet_kWh / E, operational]`.
 
-N_opp là manifest opportunity trong cửa sổ đo, không phụ thuộc policy. Các terminal failure là no_feasible_station, voluntary_deferred, declined, abandoned, deadline_missed và stranded. Mỗi request chỉ một terminal. Stranded trước activation được ghi tại opportunity mà không tạo request giả. No-need/busy/absent/departing là ineligibility, không tự tính thành thất bại dịch vụ.
+`E` là planned electric-vehicle days trong Measurement, bao gồm kế hoạch inbound bị chặn; không dùng số intent nội sinh làm mẫu số. Mỗi intent có một ID qua retry và deadline cố định 360 phút từ lúc tạo. Cohort gồm intent được tạo trong `[warmup, warmup + measurement)`, quan sát đến hết Drain. GAMA tính vector; Python kiểm tra ledger và xếp hạng vector trước CMA-ES tell.
 
-Mặc định development beta=beta_E=1. Hai phần failure và energy thể hiện hai ưu tiên khác nhau, không cộng D(I+u) lần nữa. Phân tích0.5/1/2 và review tỷ trọng phải hoàn tất trước freeze; chưa được coi đây là hệ số đã validation. Không có request: conditional waiting/energy ratio0; không có opportunity: fitness_invalid. Dừng sớm là incomplete/censored, không được nhận làm fitness.
+`operational = 0.5 * mean_completion / 360 + 0.3 * P95_wait / 360 + 0.2 * queue_pressure`.
+
+Mean completion chỉ trên intent completed. Waiting cộng các khoảng chờ vật lý duy nhất của intent đã đến hàng đợi; giữ phần quan sát được của mẫu censored. Cohort điều kiện rỗng được báo `null`, cỡ mẫu 0; component tương ứng bằng 0. Các thành phần failure đứng trước operational ngăn việc đổi thất bại lấy điểm thời gian thấp. Observation kết thúc sớm làm fitness không hợp lệ.
+
+Queue pressure lấy cực đại trong Measurement + Drain của `E_wait / (E_wait + 6 * P_eff)`, trong đó P_eff từ lịch FIFO giải phóng toàn bộ backlog vật lý, gồm phiên bận và tải ngoài cohort. Khi có backlog mà năng lực bằng 0, pressure bằng 1. Đây không phải queue length chia 125 cổng. Đặc tả và tolerance nằm trong `configs/gama/objective.json`.
+
+## Accuracy và giao thức lựa chọn
+
+Mean waiting ≤ 1 phút; P95 waiting ≤ 5 phút; externality ≤ 5 vehicle-minutes so với Monte Carlo reference. Ít nhất 95% probe đạt đồng thời ba ngưỡng, riêng từng phương pháp. Reference dùng một nửa ngưỡng. Ngưỡng H là lựa chọn kỹ thuật đăng ký trước (5/120 trên thang H), chưa phải chuẩn thực nghiệm. Phải kiểm tra đủ/duy nhất/hữu hạn 165 probe.
+
+Kiểm tra timestep dùng reference 1 giây, các bước 5/10/30/60 giây; ưu tiên 1–4 của fitness có sai số tuyệt đối tối đa `[0, 0.01, 0.01, 0.1]` theo đơn vị đã chuẩn hóa, chênh lệch conditional intent-success ≤ 0.01, operational tương đối ≤ 1%. Thiếu mẫu quan sát không được tự nhận đạt.
+
+Accuracy chạy trước development/design. Design mặc định đăng ký temperature 0.2, heartbeat 5 phút, stabilization off. Có 15 tên biến thể, 12 cấu hình duy nhất; phân tích độ nhạy không tự thay cấu hình chính. Freeze phải liên kết đủ ma trận run, native validation, development và calibration bằng hash.
+
+CMA-ES có population 16, ba optimizer seed 41001–41003. Candidate dùng 11001–11006, validation 21001–21006. Ngân sách tối đa 72 giờ active training cộng dồn qua resume, dự trù 15%. Model được chọn bằng validation vector; evaluation 31001–31030 gồm 720 rollout và không tham gia lựa chọn model.
 
 ## Giả định và phần chưa được xác nhận
 
-Tần suất0.2/0.8 cơ hội/EV/ngày cho760 cơ hội cơ bản, không ép760 activations. SOC<30, target80, pin60kWh, public-only; không đổi SOC để đạt quota. Native driving, GIS/gates và hourly profiles là mô hình phát triển, chưa hiệu chỉnh giao thông Nha Trang thực. Connector generic-public là giả định tương thích chưa khảo sát. Mất thông tin không đồng nghĩa station outage; outage chưa nhận có thể gây failure thực tế.
+Không còn tần suất opportunity sạc/ngày trong môi trường hiện hành. Ngưỡng và preferred target lấy mẫu riêng một lần cho mỗi EV; quyết định còn xét hoạt động, ca taxi, chuyến đã biết và reserve5%. Nhu cầu kWh được cập nhật theo SOC tại trạm. Xem [phân phối và retry](GAMA_ENERGY_CHARGING_VI.md). Native driving, GIS/gates, lịch hoạt động và hành vi vẫn là giả định phát triển, chưa hiệu chỉnh bằng dữ liệu Nha Trang thực. Connector generic-public là giả định tương thích chưa khảo sát.
 
 Không diễn giải các khác biệt activation nội sinh là tự động cải thiện. Báo cả opportunity, eligibility, failure, unmet energy, SOC, stranded và thời gian phục vụ. Phần methodology triển khai nằm tại [bản mô tả](manuscripts/METHODOLOGY_IMPLEMENTED_VI.md); PDF lịch sử được giữ nguyên.
 

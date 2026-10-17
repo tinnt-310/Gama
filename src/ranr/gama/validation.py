@@ -73,15 +73,20 @@ def run_model(model, experiment, steps, marker=None, parameters=None, seed=42, r
         log = launch([xml, out])
         console = "\n".join(p.read_text() for p in out.glob("console*.txt"))
         console += "\n" + log
+        from .monitoring import MEMORY_WARNING
+        checked_console = "\n".join(line for line in console.splitlines() if line.strip() != MEMORY_WARNING)
         failures = [
             "Runtime error",
             "Assert failed",
             "Error in",
             "Exception",
+            "OutOfMemoryError",
+            "GC overhead limit exceeded",
+            "A fatal error has been detected",
             "NOT_IMPLEMENTED",
             "No parameter named",
         ]
-        if any(word in console for word in failures) or (
+        if any(word in checked_console for word in failures) or (
             marker and marker not in console
         ):
             raise RuntimeError(console + "\n" + log)

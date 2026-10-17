@@ -1,6 +1,6 @@
 # Kiến trúc nghiên cứu GAMA RANR-AW
 
-Môi trường `persistent-controlled-distributed-3`. GAMA thực thi vật lý, nhu cầu và recommendation; Python điều phối GAMA, kiểm chứng và phân tích. Không có simulator Python trong nguồn hiện hành. Checkpoint trước sửa: Git `5800181`; mã legacy và dữ liệu nghiên cứu lịch sử có thể đối chiếu tại checkpoint, không thuộc pipeline hiện tại.
+Môi trường `persistent-soc-activity-6`. GAMA thực thi vật lý, nhu cầu và recommendation; Python điều phối GAMA, kiểm chứng và phân tích. Không có simulator Python trong nguồn hiện hành. Checkpoint trước sửa: Git `5800181`; mã legacy và dữ liệu nghiên cứu lịch sử có thể đối chiếu tại checkpoint, không thuộc pipeline hiện tại.
 
 ```text
 models/
@@ -11,7 +11,7 @@ models/
     Math.gaml                  cấu hình, record helpers, RNG, weights, shadow queue
     Prediction.gaml            snapshot/ETA Monte Carlo, externality ghép cặp
     Policy.gaml                observation từng trạm, exposure, recommendation
-    Fleet.gaml                 opportunities, eligibility, inbound/outbound
+    Fleet.gaml                 traits/lịch cá nhân, intent/retry, inbound/outbound
     Evaluation.gaml            outcome và objective phân rã
     Runtime.gaml               thứ tự sự kiện, transport, behavior, logs
   tests/                       fixtures GAML nhỏ, không phải kết quả nghiên cứu
@@ -39,6 +39,8 @@ Chiều import GAML là một DAG: Runtime → Evaluation → Fleet → Charging
 
 Observation và request là các record số được sao chép. Policy không nhận agent, global fleet hoặc opportunity manifest. PhysicalState tồn tại trong GAMA; evaluator được phép đọc truth để ghi kết quả. Bộ vận chuyển truy cập địa chỉ agent nhằm giao packet, không cung cấp trạng thái peer cho policy.
 
-Một tick xử lý service và các terminal events, deadline, arrival, packet đã đến từ tick trước, exceptional replanning, opportunities, request có thứ tự ID, capture/broadcast và logging. Packet phát trong tick này chỉ nhận từ tick sau kể cả delay=0; local exposure cập nhật ngay. Đây là thứ tự scheduler xác định, không có barrier chờ quyết định toàn mạng hay central dispatcher.
+Một tick xử lý service và các terminal events, deadline, arrival, packet đã đến từ tick trước, exceptional replanning, intent/điều kiện retry, request có thứ tự ID, capture/broadcast và logging. Packet phát trong tick này chỉ nhận từ tick sau kể cả delay=0; local exposure cập nhật ngay. Đây là thứ tự scheduler xác định, không có barrier chờ quyết định toàn mạng hay central dispatcher.
 
-Output từng run gồm configuration, initial fleet, opportunity/traffic manifests, opportunity_results, opportunity_outcomes, demand, recommendations, messages, events, vehicles, queue_history, outcomes, metrics và completion. GUI calibration bổ sung registration/provenance từ đầu và artifact hashes khi hoàn tất. Model/calibration/schema cũ bị từ chối; không sửa nhãn nguồn cũ.
+Output từng run gồm configuration, initial fleet, activity/traffic/trait manifests, intents, attempts, intent_outcomes, demand, recommendations, messages, events, vehicles, queue_history, outcomes, metrics và completion. GUI calibration bổ sung registration/provenance từ đầu và artifact hashes khi hoàn tất. Model/calibration/schema cũ bị từ chối; không sửa nhãn nguồn cũ.
+
+Fleet theo dõi các sự kiện năng lượng/hoạt động và duy trì intent có ID ổn định. ChargingService dùng chung cho cả hai nhóm EV, chặn chuyến thiếu pin và thực hiện sạc tại cổng. Không còn opportunity scheduler. Exogenous hash gồm initial fleet, vehicle_traits, activity_plan và traffic_plan; request thực có thể khác giữa policy. Validator đối chiếu intent/attempt/outcome và kiểm tra vật lý từng lượt. Xem [thiết kế sạc theo SOC](GAMA_ENERGY_CHARGING_VI.md).

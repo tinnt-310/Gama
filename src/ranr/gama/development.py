@@ -1,13 +1,13 @@
 """Long development validation, kept separate from smoke and official test results."""
 
-from dataclasses import replace
+from dataclasses import replace, asdict
 from pathlib import Path
 import csv
 import json
 import math
 from collections import Counter, defaultdict
 
-from ..paths import ROOT, write_json
+from ..paths import ROOT, write_json, digest
 from .headless import (
     RunConfig,
     METHODS,
@@ -17,6 +17,7 @@ from .headless import (
     checked_result,
 )
 from .pipeline import jobs, report
+from .contracts import validate_charging_files
 
 
 def summarize_run(folder: Path) -> dict:
@@ -66,25 +67,9 @@ def summarize_run(folder: Path) -> dict:
                     base * config["rush_extra_percent"] / 100
                 ):
                     raise ValueError("Inbound population cap exceeded")
-    opportunities = json.loads((folder / "opportunities.json").read_text())
-    ids = [x["key"] for x in opportunities]
-    with (folder / "opportunity_results.csv").open() as f:
-        results = list(csv.DictReader(f))
-    if len(ids) != len(set(ids)) or sorted(ids) != sorted(
-        int(x["key"]) for x in results
-    ):
-        raise ValueError("Missing or repeated opportunity checks")
-    outcomes = json.loads((folder / "outcomes.json").read_text())
-    active = {int(x["key"]) for x in results if x["status"] == "activated"}
-    if active != {x["key"] for x in outcomes}:
-        raise ValueError("Activated opportunities and outcomes differ")
-    low, high = (
-        config["warmup_minutes"],
-        config["warmup_minutes"] + config["measure_minutes"],
-    )
-    counts = Counter(
-        (x["kind"], x["status"]) for x in results if low <= float(x["at"]) < high
-    )
+    validate_charging_files(folder)
+    outcomes = json.loads((folder / "intent_outcomes.json").read_text())
+    counts = Counter((x["kind"], x["status"]) for x in outcomes if x["measured"])
     distances = defaultdict(float)
     daily_metres = defaultdict(float)
     with (folder / "vehicles.csv").open() as f:
@@ -114,13 +99,10 @@ def summarize_run(folder: Path) -> dict:
                 if not 0 <= soc <= 100 or abs(max(0, min(100, expected)) - soc) > 1e-4:
                     raise ValueError("SOC/energy conservation failed")
     return {
-        "opportunity_status_counts": {f"{k[0]}/{k[1]}": v for k, v in counts.items()},
-        "activated_public_requests_per_day": metrics["demand_count"]
+        "intent_status_counts": {f"{k[0]}/{k[1]}": v for k, v in counts.items()},
+        "recommendation_attempts_per_day": metrics["demand_count"]
         * 1440
         / config["measure_minutes"],
-        "nominal_base_target_per_day": config["private_evs"]
-        * config["private_frequency"]
-        + config["electric_taxis"] * config["taxi_frequency"],
         "mean_distance_km_by_kind": {
             kind: sum(distances[x["id"]] for x in initial if x["kind"] == kind)
             / max(1, sum(x["kind"] == kind for x in initial))
@@ -151,7 +133,7 @@ def development(
         development=True,
         calibrating=False,
         warmup_minutes=360,
-        measure_minutes=1440,
+        measure_minutes=3600,
         deadline_minutes=360,
         trace=True,
     )
@@ -192,9 +174,15 @@ def development(
     if provenance() != source:
         raise ValueError("Source changed during development validation")
     record = {
-        "passed": all(x["activated_public_requests_per_day"] > 0 for x in summaries),
+        "passed": all(x["recommendation_attempts_per_day"] > 0 for x in summaries),
         "source": source,
         "config": config.__dict__,
+        "folder": str(folder.resolve()),
+        "dependencies": [
+            {"path": str((folder / "runs" / case / str(seed) / method / "manifest.json").resolve()),
+             "sha256": digest(folder / "runs" / case / str(seed) / method / "manifest.json")}
+            for case in cases for seed in seeds for method in METHODS
+        ],
         "rollouts": len(summaries),
         "summaries": summaries,
         "congestion_observed": any(x["peak_queue"] > 0 for x in summaries),
@@ -202,4 +190,26 @@ def development(
     }
     write_json(folder / "development_validation.json", record)
     write_json(OUTPUT / "development_validation.json", record)
+    return record
+
+
+def verify_development(path, config):
+    from .evidence import read_evidence
+    record = read_evidence(path)
+    expected = replace(config, development=True, calibrating=False, warmup_minutes=360,
+                       measure_minutes=3600, deadline_minutes=360, trace=True)
+    if record.get("config") != asdict(expected) or record.get("rollouts") != 36 or not record.get("dependencies"):
+        raise ValueError("Development configuration/grid changed or evidence missing")
+    folder = Path(record["folder"])
+    from .contracts import validate_paired_results
+    for case in ("normal", "high", "burst"):
+        for seed in (700001,700002,700003):
+            groups = []
+            for method in METHODS:
+                row = checked_result(folder/"runs"/case/str(seed)/method,
+                    {"source":provenance(),"config":asdict(replace(expected,case=case,seed=seed,method=method)),
+                     "calibration_sha256":digest(Path(config.calibration))})
+                if row["demand_count"] <= 0: raise ValueError("Development has no recommendation observations")
+                groups.append([{**row,"case":case,"seed":seed}])
+            validate_paired_results(groups)
     return record

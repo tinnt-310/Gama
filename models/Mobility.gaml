@@ -3,8 +3,11 @@ model mobility
 global {
     float step <- 1.0 #s;
     bool keyed_driving <- false;
+    float mobility_master_seed <- -1.0;
+    float mobility_seed -> mobility_master_seed>=0.0 ? mobility_master_seed : float(seed);
     bool mobility_cache_distances <- true;
     graph road_network;
+    list<intersection> access_intersections <- [];
     float lane_width <- 1.0;
     float vehicle_icon_size_px <- 40.0;
     int batter_insufficient <- 0;
@@ -29,11 +32,6 @@ global {
     bool half <- true;
     list<int> CHARGING_RATES <- [250, 180, 150, 60, 30, 11];
 
-    float mobility_rng_seed(int entity,int event_key) {
-        float value <- abs(seed)+entity*1009.0+event_key*9176.0;
-        loop k from: 1 to: 4 { value <- value*16807.0+1.0; value <- value-floor(value/2147483647.0)*2147483647.0; }
-        return value;
-    }
     float keyed_uniform(float master, int domain, int entity, int draw) {
         float modulus <- 2147483647.0;
         float value <- 1.0 + abs(master)-floor(abs(master)/(modulus-1.0))*(modulus-1.0);
@@ -87,10 +85,11 @@ species road schedules: (keyed_driving ? [] : list(road)) skills: [road_skill] {
 
 }
 
-species vehicle skills: [driving] {
+species vehicle skills: [driving] parallel:false {
     int mobility_id <- index;
     bool ranr_inbound <- false;
     bool ranr_stranded <- false;
+    bool ranr_energy_hold <- false;
     bool ranr_exiting <- false;
     int ranr_exit_id <- -1;
     float ranr_depart_at <- -1.0;
@@ -149,19 +148,19 @@ species vehicle skills: [driving] {
     }
 
     bool mobility_flip(float probability,int draw) {
-        return keyed_driving ? world.keyed_uniform(seed,701,mobility_id,cycle*31+draw)<probability : flip(probability);
+        return keyed_driving ? world.keyed_uniform(mobility_seed,701,mobility_id,cycle*31+draw)<probability : flip(probability);
     }
     float mobility_range(float low,float high,int draw) {
-        return keyed_driving ? low+(high-low)*world.keyed_uniform(seed,702,mobility_id,cycle*31+draw) : rnd(low,high);
+        return keyed_driving ? low+(high-low)*world.keyed_uniform(mobility_seed,702,mobility_id,cycle*31+draw) : rnd(low,high);
     }
     building mobility_building(list<building> candidates,int draw) {
         if empty(candidates) { return nil; }
-        return keyed_driving ? candidates[min(length(candidates)-1,int(world.keyed_uniform(seed,703,mobility_id,cycle*31+draw)*length(candidates)))] : one_of(candidates);
+        return keyed_driving ? candidates[min(length(candidates)-1,int(world.keyed_uniform(mobility_seed,703,mobility_id,cycle*31+draw)*length(candidates)))] : one_of(candidates);
     }
     reflex work_vehicle_behavior when: is_work_car and !ranr_inbound and !ranr_stranded {
 
         // Morning commute (6h–9h)
-        if (day_start_time and target = nil and !needs_charging) {
+        if (day_start_time and target = nil and final_target = nil and !needs_charging) {
             target <- work_place; // Workplaces
             do compute_path graph: road_network target: target.closest_intersection;
             wait <- true;
@@ -169,7 +168,7 @@ species vehicle skills: [driving] {
         }
 
         // Lunch break at 12h
-        if (simulation_hour >= day_hour + 12 and simulation_hour < day_hour + 13 and has_lunch = false and !needs_charging) {
+        if (simulation_hour >= day_hour + 12 and simulation_hour < day_hour + 13 and has_lunch = false and final_target = nil and !needs_charging) {
             if (mobility_flip(0.5,1)) {
                 temp_target <- target;
                 target <- keyed_driving ? (buildings_type_3 closest_to self) : one_of(buildings_type_3 closest_to self); // Food/entertainment
@@ -189,7 +188,9 @@ species vehicle skills: [driving] {
             do  compute_path graph: road_network target: target.closest_intersection;
         }
 
-        if (wait_until >= 0 and simulation_hour >= wait_until and !needs_charging) {
+        // Native compute_path snaps to a source vertex. Finish the current trip
+        // before an activity schedule can replace it, including a late return home.
+        if (wait_until >= 0 and simulation_hour >= wait_until and final_target = nil and !needs_charging) {
             has_lunch <- false;
             target <- home;
             at_home <- true;
@@ -255,12 +256,12 @@ species vehicle skills: [driving] {
 
     action reset_daily_schedule {
         float day_offset <- (day_counter - 1) * 24.0;
-        day_start <- keyed_driving ? day_offset+5.0+2.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+0) : rnd(5.0 + day_offset, 7.0 + day_offset);
-        day_end <- keyed_driving ? day_offset+20.0+4.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+1) : rnd(20.0 + day_offset, 24.0 + day_offset);
-        taxi_end <- keyed_driving ? day_offset+20.0+4.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+2) : rnd(20.0 + day_offset, 24.0 + day_offset);
-        entertain_time1 <- keyed_driving ? day_offset+8.0+3.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+3) : rnd(8.0 + day_offset, 11.0 + day_offset);
-        entertain_time2 <- keyed_driving ? day_offset+13.0+4.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+4) : rnd(13.0 + day_offset, 17.0 + day_offset);
-        entertain_time3 <- keyed_driving ? day_offset+18.0+4.0*world.keyed_uniform(seed,704,mobility_id,day_counter*8+5) : rnd(18.0 + day_offset, 22.0 + day_offset);
+        day_start <- keyed_driving ? day_offset+5.0+2.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+0) : rnd(5.0 + day_offset, 7.0 + day_offset);
+        day_end <- keyed_driving ? day_offset+20.0+4.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+1) : rnd(20.0 + day_offset, 24.0 + day_offset);
+        taxi_end <- keyed_driving ? day_offset+20.0+4.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+2) : rnd(20.0 + day_offset, 24.0 + day_offset);
+        entertain_time1 <- keyed_driving ? day_offset+8.0+3.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+3) : rnd(8.0 + day_offset, 11.0 + day_offset);
+        entertain_time2 <- keyed_driving ? day_offset+13.0+4.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+4) : rnd(13.0 + day_offset, 17.0 + day_offset);
+        entertain_time3 <- keyed_driving ? day_offset+18.0+4.0*world.keyed_uniform(mobility_seed,704,mobility_id,day_counter*8+5) : rnd(18.0 + day_offset, 22.0 + day_offset);
         day_start_time <- false;
         day_end_time <- true;
         has_lunch <- false;
@@ -283,11 +284,8 @@ species vehicle skills: [driving] {
     reflex move when: final_target != nil and !ranr_stranded {
         float prior_metres <- remaining_trip_metres();
         max_speed <- (mobility_nominal_speed #km / #h) * world.road_speed_factor(road(current_road));
-        float saved_seed <- seed; int saved_usage <- rng_usage;
-        if keyed_driving { seed <- world.mobility_rng_seed(mobility_id,cycle); }
         do drive;
         ranr_lifetime_metres <- ranr_lifetime_metres+max(0.0,prior_metres-remaining_trip_metres());
-        if keyed_driving { seed <- saved_seed; rng_usage <- saved_usage; }
         if (final_target = nil) {
             do unregister;
         } else {

@@ -1,0 +1,5 @@
+[
+  {"at": 1.0, "sid": 0, "operational": true, "factor": 1.0, "failed_ports": [0]},
+  {"at": 3.0, "sid": 0, "operational": true, "factor": 1.0, "failed_ports": []},
+  {"at": 7.0, "sid": 0, "operational": true, "factor": 0.33, "failed_ports": []}
+]

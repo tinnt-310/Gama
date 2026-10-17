@@ -11,6 +11,7 @@ import time
 import numpy as np
 from scipy import stats
 from ..paths import ROOT, write_json, digest
+from .contracts import OBJECTIVE_CONFIG_HASH, validate_paired_results
 from .headless import (
     RunConfig,
     METHODS,
@@ -67,7 +68,8 @@ def jobs(
     return result
 
 
-def collect_calibration(folders: list[Path], target: Path) -> dict:
+def collect_calibration(folders: list[Path], target: Path, compatibility: Path | None = None) -> dict:
+    from .evidence import validate_collection
     seen_runs = set()
     snapshots = []
     contexts = []
@@ -95,7 +97,7 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
             raise ValueError("Calibration requires complete GAMA calibration runs")
         from .headless import checked_result
 
-        checked_result(folder, {"source": provenance()})
+        validate_collection(folder, compatibility)
         shared={k:v for k,v in config.items() if k not in ("seed","render","timeout_seconds")}
         if configurations and configurations[0]!=shared:raise ValueError("Inconsistent calibration configurations")
         configurations.append(shared)
@@ -210,9 +212,10 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
         values = counts / counts.sum()
         response_prior[category] = dict(zip(("match", "other", "outside"), values.tolist()))
     result = {
-        "schema": "gama-calibration-v3",
-        "objective_version": "opportunity-service-3",
-        "observation_version": "station-observation-3",
+        "schema": "gama-calibration-v4",
+        "objective_version": "intent-service-5",
+        "objective_config_hash": OBJECTIVE_CONFIG_HASH,
+        "observation_version": "station-observation-4",
         "response_prior": response_prior,
         "response_identification": "P(observed destination class | offer, category), not latent compliance; Dirichlet(1,1,1)",
         "environment_version": ENVIRONMENT_VERSION,
@@ -220,6 +223,8 @@ def collect_calibration(folders: list[Path], target: Path) -> dict:
         "split": "train",
         "source": provenance(),
         "runs": {str(p.resolve()): digest(p / "manifest.json") for p in folders},
+        "input_sources": {str(p.resolve()): json.loads((p / "manifest.json").read_text())["source"] for p in folders},
+        "compatibility": ({"path": str(compatibility.resolve()), "sha256": digest(compatibility)} if compatibility else None),
         "release_fractions": release,
         "energy_fractions": energy,
         "energy_samples": [x["energy"] for x in contexts],
@@ -249,7 +254,7 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
         raise ValueError("Duplicate runs would inflate the statistical sample")
     folder.mkdir(parents=True, exist_ok=True)
     metrics = [
-        "objective",
+        "operational_objective",
         "mean_travel_min",
         "mean_wait_min",
         "p95_wait_min",
@@ -260,6 +265,10 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
         "wall_seconds",
         "communication_bytes",
     ]
+    for row in rows:
+        if isinstance(row.get("fitness_vector"),list):
+            for i,value in enumerate(row["fitness_vector"],1):row[f"fitness_{i}"]=value
+    metrics += [name for name in ("planned_ev_days","mobility_planned_count","mobility_unserved_count","not_on_time_count","unmet_kwh","conditional_success_rate","conditional_on_time_rate","waiting_sample_count","deadline_missed_count","fitness_1","fitness_2","fitness_3","fitness_4","fitness_5") if all(name in row for row in rows)]
     # Flatten numerical GAMA objective components for seed-level confidence intervals.
     for row in rows:
         for name,value in row.get("objective_components",{}).items():
@@ -268,7 +277,7 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
     metrics += [
         name
         for name in (
-            "mean_completed_time_min", "mean_time_per_opportunity_min", "measurement_opportunity_count",
+            "mean_completed_time_min", "mean_time_per_intent_min", "measurement_intent_count",
             "mean_charging_min", "recommendation_latency_mean_ms", "recommendation_latency_p95_ms", "recommendation_latency_max_ms", "event_broadcasts", "periodic_broadcasts", "duplicate_packets", "received_information_age_min", "prediction_service_start_mae_min", "prediction_p95_coverage",
             "unserved_kwh",
             "served_energy_fraction",
@@ -280,9 +289,15 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
             "mean_recommendation_entropy",
             "cpu_seconds",
             "max_rss_kib",
-            "opportunity_count",
-            "activated_count",
-            "burst_shortfall",
+            "intent_count",
+            "request_attempt_count",
+            "recommendation_attempt_count",
+            "retry_attempt_count",
+            "completed_intent_count",
+            "unresolved_intent_count",
+            "intent_requested_kwh",
+            "intent_delivered_kwh",
+            "energy_held_vehicle_count",
             "persistent_vehicle_count",
             "stranded_vehicle_count",
             "inbound_created",
@@ -299,11 +314,12 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
                     [
                         r[metric]
                         for r in rows
-                        if r["case"] == case and r["method"] == method
+                        if r["case"] == case and r["method"] == method and r.get(metric) is not None
                     ],
                     dtype=float,
                 )
                 if not len(values):
+                    summaries.append(dict(case=case,method=method,metric=metric,n=0,mean=None,ci_low=None,ci_high=None))
                     continue
                 margin = (
                     float(stats.t.ppf(0.975, len(values) - 1) * stats.sem(values))
@@ -343,7 +359,10 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
                 }
                 if a.keys() != b.keys():
                     raise ValueError("Incomplete paired comparison")
-                keys = sorted(a)
+                keys = sorted(k for k in a if a[k] is not None and b[k] is not None)
+                if not keys:
+                    paired.append(dict(case=case,metric=metric,baseline=baseline,n=0,difference=None,ci_low=None,ci_high=None,paired_effect_size=None,percent_change=None,p=None))
+                    continue
                 difference = np.array([a[k] - b[k] for k in keys], dtype=float)
                 mean = float(difference.mean())
                 sd = float(difference.std(ddof=1)) if len(keys) > 1 else 0
@@ -357,7 +376,7 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
                     if len(keys) > 1
                     else None
                 )
-                denom = float(np.mean(list(b.values())))
+                denom = float(np.mean([b[k] for k in keys]))
                 paired.append(
                     {
                         "case": case,
@@ -397,7 +416,9 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    for metric in ["objective", "mean_wait_min", "p95_wait_min"]:
+    plotted = ["operational_objective", "mean_wait_min", "p95_wait_min"]
+    plotted += [f"fitness_{i}" for i in range(1,6) if all(f"fitness_{i}" in r for r in rows)]
+    for metric in plotted:
         fig, ax = plt.subplots(figsize=(8, 3.5))
         for j, method in enumerate(METHODS):
             entries = [
@@ -412,7 +433,7 @@ def report(rows: list[dict], folder: Path, profile: str) -> None:
             ]
             ax.bar(
                 np.arange(len(cases)) + (j - 1.5) * 0.2,
-                [x["mean"] for x in entries],
+                [x["mean"] if x["mean"] is not None else float("nan") for x in entries],
                 width=0.2,
                 label=method,
             )
@@ -459,9 +480,9 @@ def benchmark_budget(
     for maximum in range(256, 4097, 256):
         minimum = min(1024, maximum)
         interval = min(256, minimum // 4)
-        # Three optimizer seeds; every checkpoint long validation; 3 finalists x 3 new long-validation replicates.
+        # Actual protocol: three optimizer seeds and fixed validation checkpoints.
         serial = 3 * maximum * sum(candidate_seconds.values()) + (
-            3 * math.ceil(maximum / interval) + 9
+            3 * math.ceil(maximum / interval)
         ) * sum(long_seconds.values())
         estimated = serial / speedup
         if estimated <= hours * 3600 * 0.85:

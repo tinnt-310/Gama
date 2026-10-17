@@ -41,7 +41,7 @@ species ranr_station_agent {
         list<map<string,unknown>> snapshots <- []; list<float> watermarks <- []; list<float> rates <- [];
         list<map<string,unknown>> exposure <- []; map<string,map<string,unknown>> resolutions <- copy(ranr_resolutions);
         loop sid from: 0 to: length(public_prior)-1 {
-            map<string,unknown> snapshot <- world.ranr_clone_snapshot(public_prior[sid]); float watermark <- max(0.0,at-ranr_deadline); float rate <- ranr_prior_rate;
+            map<string,unknown> snapshot <- world.ranr_clone_snapshot(public_prior[sid]); float watermark <- max(0.0,at-ranr_arrival_lookback); float rate <- ranr_prior_rate;
             if sid=ranr_sid {
                 snapshot <- world.ranr_clone_snapshot(ranr_local_snapshot); watermark <- at; rate <- ranr_local_rate;
                 exposure <- exposure+list(ranr_local_exposure.values);
@@ -62,7 +62,12 @@ species ranr_station_agent {
         loop cohort over:exposure {
             string token <- "token" in cohort.keys ? string(cohort["token"]) : string(cohort["key"]);
             if token in resolutions.keys { continue; }
-            if !(token in unique.keys) or int(cohort["version"])>int(unique[token]["version"]) { unique[token] <- world.ranr_record(cohort); unique[token]["travel"] <- copy(cohort["travel"]); }
+            if !(token in unique.keys) or int(cohort["version"])>int(unique[token]["version"]) {
+                map<string,unknown> remembered <- world.ranr_record(cohort);
+                remembered["travel"] <- copy(cohort["travel"]);
+                if "energy_by_station" in cohort.keys { remembered["energy_by_station"] <- copy(cohort["energy_by_station"]); }
+                unique[token] <- remembered;
+            }
         }
         exposure <- list(unique.values);
         loop cohort over:exposure { cohort["remaining_probability"] <- sum(world.ranr_outstanding_mass(cohort,at)); }
@@ -70,7 +75,7 @@ species ranr_station_agent {
     }
     map<string,unknown> ranr_recommend(map<string,unknown> request,map<string,unknown> observation) {
         int key <- int(request["key"]);
-        if key in ranr_request_cache.keys { return copy(ranr_request_cache[key]); }
+        if (ranr_request_cache contains_key key) { return copy(ranr_request_cache[key]); }
         if "issuer" in request.keys { assert int(request["issuer"])=ranr_sid; }
         float started <- machine_time;
         ranr_local_requests <- (ranr_local_requests where (each>float(observation["at"])-5.0))+[float(observation["at"])];
@@ -148,8 +153,9 @@ species ranr_station_agent {
         ranr_local_rate <- 0.5*ranr_prior_rate+0.5*length(ranr_local_requests)/5.0;
         string token <- "token" in request.keys ? string(request["token"]) : string(ranr_sid)+":"+string(key)+":0";
         map<string,unknown> cohort <- world.ranr_record(["key"::key,"token"::token,"anonymous"::false,"sender"::ranr_sid,"recommended"::selected,"count"::1,"version"::1,
-            "context"::("context" in request.keys ? request["context"] : "default"),"issued"::observation["at"],"expires"::(float(observation["at"])+ranr_deadline),
+            "context"::("context" in request.keys ? request["context"] : "default"),"issued"::observation["at"],"expires"::(float(observation["at"])+("remaining_observation" in request.keys ? float(request["remaining_observation"]) : ranr_warmup+ranr_measure+ranr_deadline)),
             "eta_profile"::ranr_calibration_source,"bucket"::int(floor(float(observation["at"])/5.0)),"travel"::copy(travel),"energy"::request["energy"],"max_kw"::request["max_kw"],"resolved"::false]);
+        if "energy_by_station" in request.keys { cohort["energy_by_station"] <- copy(request["energy_by_station"]); }
         ranr_local_exposure[token] <- cohort; ranr_dirty <- true;
         if length(ranr_local_exposure)-ranr_last_exposure>=ranr_event_exposure { ranr_forecast_history <- []; ranr_critical <- true; }
         ranr_policy_ms <- ranr_policy_ms+machine_time-started;
@@ -160,12 +166,12 @@ species ranr_station_agent {
     action ranr_resolve(string token,string status,float at) {
         if token="" { return nil; }
         if token in ranr_resolutions.keys and string(ranr_resolutions[token]["status"])=status { return nil; }
-        map<string,unknown> resolution <- world.ranr_record(["token"::token,"status"::status,"version"::(status="arrived" ? 1 : 2),"at"::at,"source"::ranr_sid,"expires"::(at+ranr_ttl+ranr_deadline)]);
+        map<string,unknown> resolution <- world.ranr_record(["token"::token,"status"::status,"version"::(status="arrived" ? 1 : 2),"at"::at,"source"::ranr_sid,"expires"::max(at+ranr_ttl,ranr_warmup+ranr_measure+ranr_deadline)]);
         if token in ranr_resolutions.keys {
             map<string,unknown> previous <- ranr_resolutions[token];
             if previous["status"]="arrived" or "arrival_at" in previous.keys {
                 resolution["arrival_at"] <- "arrival_at" in previous.keys ? previous["arrival_at"] : previous["at"];
-                loop name over:["energy","max_kw","deadline"] { if name in previous.keys { resolution[name] <- previous[name]; } }
+                loop field_name over:["energy","max_kw","service_until"] { if field_name in previous.keys { resolution[field_name] <- previous[field_name]; } }
             }
         }
         ranr_resolutions[token] <- resolution;

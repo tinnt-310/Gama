@@ -37,7 +37,7 @@ class TimeoutRecovery(unittest.TestCase):
                 raise subprocess.TimeoutExpired(["test-launcher"], limit)
 
             with patch("ranr.gama.headless._launch", side_effect=timeout):
-                with self.assertRaisesRegex(TimeoutError, "1062/1080"):
+                with self.assertRaisesRegex(TimeoutError, "1062/4320"):
                     run(RunConfig(development=True), [0.0] * 20, folder)
             record = json.loads((folder / "manifest.json").read_text())
             self.assertEqual(record["status"], "failed")

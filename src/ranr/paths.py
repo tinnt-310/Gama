@@ -14,7 +14,12 @@ OUTPUTS = ROOT / "outputs" / "ranr"
 
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Long physical traces can exceed the Python process's available memory.
+    result = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            result.update(block)
+    return result.hexdigest()
 
 
 def write_json(path: Path, value: Any) -> None:

@@ -1,6 +1,6 @@
 # Nha Trang GAMA RANR-AW
 
-Một mô hình GAMA: **4700 xe thường trực + controlled public-charging opportunities + inbound rush traffic + recommendation phi tập trung**. Bốn phương pháp RANR-AW, No-P2P, No-Prediction và Fixed-Weights dùng chung vật lý GAML. Python điều phối CMA-ES qua GAMA Headless và phân tích kết quả.
+Một mô hình GAMA: **4700 xe thường trực + nhu cầu sạc theo SOC và lịch hoạt động + inbound rush traffic + recommendation phi tập trung**. Bốn phương pháp RANR-AW, No-P2P, No-Prediction và Fixed-Weights dùng chung vật lý GAML. Python điều phối CMA-ES qua GAMA Headless và phân tích kết quả.
 
 Mở `models/main.gaml` → **Run me** → Play để xem mô phỏng. Để thu calibration hoàn toàn từ giao diện, chọn **Collect training data**, chạy đủ seed800001/800002/800003 đến completion, sau đó **Validate and build calibration**. Hướng dẫn chi tiết: [GAMA run guide](docs/GAMA_RANR_RUN_GUIDE_VI.md).
 
@@ -18,3 +18,5 @@ Mở `models/main.gaml` → **Run me** → Play để xem mô phỏng. Để thu
 Nguồn trước nâng cấp được bảo toàn tại Git checkpoint `5800181`. GIS gốc và outputs lịch sử được giữ nguyên; artifacts lịch sử không phải kết quả môi trường hiện tại. Không còn đường thực thi simulator Python/central assignment trong nguồn nghiên cứu.
 
 Các kiểm tra nhỏ không thay thế calibration dài, accuracy/performance benchmark, design validation, training hoặc720 run test. Những bước dài phải chạy riêng sau kiểm chứng.
+
+Pipeline có lưu trạng thái đến training/evaluation: [README_LENH.md](README_LENH.md). Ngân sách training là 72 giờ riêng, không gồm design/benchmark/evaluation.

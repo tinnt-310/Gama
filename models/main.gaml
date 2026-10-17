@@ -4,6 +4,9 @@ import "ranr/Runtime.gaml"
 
 global {
     bool ranr_enabled <- true;
+    // Interactive defaults: one minute per cycle, three days including warmup/settlement.
+    float step <- 60.0 #s;
+    float ranr_measure <- 3600.0;
     float consumption_kwh_km <- float(ranr_environment["consumption_kwh_km"]);
     float charge_efficiency <- float(ranr_environment["charge_efficiency"]);
     string run_prefix <- "";
@@ -12,7 +15,6 @@ global {
 
 
     list<road> open_roads;
-    list<intersection> access_intersections <- [];
     float source_road_length <- 0.0;
     map<rgb, string> legends <- [color_car::"Cars", color_road::"Roads", color_lake::"Rivers & Lakes", color_private::"Private EVs"];
     rgb color_car <- #red;
@@ -58,10 +60,10 @@ global {
     int display_refresh_cycles -> max(1,int(10.0 / step));
 
     list<vehicle> mobility_population -> (agents of_generic_species vehicle);
-    int moving_vehicle_count -> length(mobility_population where (each.final_target != nil));
+    int moving_vehicle_count -> length(mobility_population where (each.final_target != nil and !each.ranr_energy_hold));
     int waiting_ev_count -> int(sum(list(charging_station) collect length(each.waiting_queue)));
     int charging_ev_count -> int(sum(list(charging_station) collect length(each.charging_vehicles)));
-    int inbound_ev_count -> length(ev_population where (each.session_state="en_route"));
+    int inbound_ev_count -> length(ev_population where (elecar(each).session_state="en_route"));
     int completed_session_count -> int(sum(list(charging_station) collect each.served_customer));
     float grid_energy_kwh -> sum(list(charging_station) collect each.power_consumed);
     float mean_ev_soc -> empty(ev_population) ? 0.0 : mean(ev_population collect each.battery_level);
@@ -74,7 +76,9 @@ global {
     init {
         float gis_started <- machine_time;
         if ranr_enabled {
-            if ranr_collect_gui { do ranr_prepare_collection; if !("COLLECTION REGISTERED" in ranr_collection_status) { ranr_error <- ranr_collection_status; do pause; return nil; } }
+            if ranr_collect_gui { do ranr_prepare_collection; if !("COLLECTION REGISTERED" in ranr_collection_status) { do ranr_abort(ranr_collection_status); return nil; } }
+            // Seed the native generator once before creating agents.
+            mobility_master_seed <- float(seed); rng <- "mersenne"; seed <- mobility_master_seed;
             // GUI starts with a visible, explicitly labelled preview if no
             // trained model exists. Headless disables this option explicitly.
             if ranr_gui_preview and (ranr_run_id="gui" or "gui_" in ranr_run_id) {
@@ -88,7 +92,7 @@ global {
                 }
             }
             do ranr_load_candidate;
-            if !ranr_candidate_loaded { ranr_done <- true; write "RANR_ERROR: "+ranr_error; do pause; return nil; }
+            if !ranr_candidate_loaded { do ranr_abort(ranr_error); return nil; }
             if ranr_run_id="gui" { ranr_run_id <- "gui_"+string(machine_time)+"_"+string(int(seed)); ranr_output <- ranr_output+"/"+ranr_run_id; }
             car_speed <- ranr_car_speed; ele_car_speed <- ranr_ev_speed;
             keyed_driving <- true; file ranr_directory <- new_folder(ranr_output); ranr_output <- ranr_directory.path; run_prefix <- ranr_output+"/population"; output_directory <- ranr_output; csv_file_path <- ranr_output+"/daily_statistics.csv";  }
@@ -167,30 +171,31 @@ global {
 
     }
 
-    reflex export_daily_statistics when: !ranr_done and simulation_hour >= (day_counter * 24) {
-        // Prepare data for all stations
-        loop station over: all_stations {
-            // Get statistics
-            float avg_waiting_time <- station.get_average_waiting_time();
-            float vehicles_charging_time <- station.get_average_charging_time();
-            float vehicles_distance_travel <- station.total_distance_travel;
-            float station_power_consumed <- station.power_consumed;
-            string station_name <- station.name;
-
-            // Create CSV line
-            string line <- ""+day_counter+","+station_name+","+vehicles_charging_time+","+avg_waiting_time+","+vehicles_distance_travel+","+station_power_consumed+"\n";
-
-            // Append to CSV file
-            save line to: csv_file_path format: 'text' rewrite: false;
-
+    action export_completed_days {
+        loop while: simulation_hour >= (day_counter * 24) {
+            loop station over: all_stations {
+                float avg_waiting_time <- station.get_average_waiting_time();
+                float vehicles_charging_time <- station.get_average_charging_time();
+                float vehicles_distance_travel <- station.total_distance_travel;
+                float station_power_consumed <- station.power_consumed;
+                string station_name <- station.name;
+                string line <- ""+day_counter+","+station_name+","+vehicles_charging_time+","+avg_waiting_time+","+vehicles_distance_travel+","+station_power_consumed+"\n";
+                save line to: csv_file_path format: 'text' rewrite: false;
+            }
+            day_counter <- day_counter + 1;
+            day_hour <- (day_counter - 1) * 24.0;
+            half <- true;
+            otherhalf <- true;
+            rush <- false;
+            rush_end <- false;
+            // Active sessions persist across midnight.
         }
-        // Increment day counter
-        day_counter <- day_counter + 1;
-        half <- true;
-        otherhalf <- true;
-        rush <- false;
-        rush_end <- false;
-        // Active sessions persist across midnight.
+    }
+    reflex export_daily_statistics when: !ranr_done and simulation_hour >= (day_counter * 24) {
+        do export_completed_days;
+    }
+    action ranr_before_finish {
+        do export_completed_days;
     }
 
     action refresh_population_targets {
@@ -310,7 +315,7 @@ global {
         road_network <- as_driving_graph(open_roads, intersection) with_shortest_path_algorithm "Dijkstra";
         // Attach sites to the public connected network, not isolated parking paths.
         // Their GIS shapes/locations are unchanged; this is the road access node.
-        access_intersections <- list(connected_components_of(road_network) with_max_of length(each));
+        access_intersections <- list(connected_components_of(road_network) with_max_of length(each)) sort_by intersection(each).index;
         assert !empty(access_intersections);
         ask building { closest_intersection <- access_intersections closest_to self; }
         ask charging_station {
@@ -327,6 +332,7 @@ experiment "Run me" type: gui{
     parameter "GAMA trained parameter file" category:"RANR" var:ranr_parameter_file;
     parameter "Train calibration file" category:"RANR" var:ranr_calibration_file;
     parameter "Development mode (untrained)" category:"RANR" var:ranr_development;
+    parameter "Objective specification hash (restart required)" category:"RANR" var:ranr_objective_config_hash;
     parameter "Run ID" category:"RANR" var:ranr_run_id;
     parameter "Output directory" category:"RANR" var:ranr_output;
     parameter "Warmup minutes" category:"RANR" var:ranr_warmup;
@@ -335,14 +341,10 @@ experiment "Run me" type: gui{
     parameter "EV nominal speed (km/h)" category:"RANR" var:ranr_ev_speed;
     parameter "Background nominal speed (km/h)" category:"RANR" var:ranr_car_speed;
     parameter "Monte Carlo samples" category:"RANR" var:ranr_samples;
-    parameter "Private EV opportunities/day" category:"RANR" var:ranr_private_frequency min:0.0;
-    parameter "Taxi opportunities/day" category:"RANR" var:ranr_taxi_frequency min:0.0;
-    parameter "Public charging SOC threshold (%)" category:"RANR" var:ranr_soc_threshold min:0.0 max:100.0;
     parameter "True compliance (environment only)" category:"RANR" var:ranr_true_compliance;
     parameter "Outside/deferred probability" category:"RANR" var:ranr_true_defer;
     parameter "Mean P2P delay (minutes)" category:"RANR" var:ranr_delay;
     parameter "Packet loss" category:"RANR" var:ranr_loss;
-    parameter "Burst requests" category:"RANR" var:ranr_burst_size;
     parameter "Render displays" category:"RANR" var:ranr_render;
     parameter "Record full trace" category:"RANR" var:ranr_trace;
     parameter "Calibration collection" category:"RANR" var:ranr_calibrating;
@@ -355,16 +357,13 @@ experiment "Run me" type: gui{
     parameter "Partition end minutes (-1 disabled) (restart required)" category:"Research design" var:ranr_partition_end;
     parameter "Driver behavior (restart required)" category:"Research design" var:ranr_behavior_case among:["high","moderate","low","contextual","misspecified"];
     parameter "Forecast stabilization (restart required)" category:"Research design" var:ranr_stabilization among:["off","smoothing","smoothing_hysteresis"];
-    parameter "Failure coefficient (development) (restart required)" category:"Research design" var:ranr_failure_beta;
-    parameter "Unmet energy coefficient (development) (restart required)" category:"Research design" var:ranr_energy_beta;
     parameter "Station event JSON file (restart required)" category:"Research design" var:ranr_station_events_file;
     parameter "Decline probability (restart required)" category:"Research design" var:ranr_true_decline min:0.0 max:1.0;
     parameter "Queue abandonment minutes (-1 disabled)" category:"Research design" var:ranr_abandon_after;
     float seed <- 42.0;
     float maximum_cycle_duration <- 0.0;
-    parameter "Target SOC (%)" category: "Energy" var: target_soc min: 1.0 max: 100.0;
     parameter "Start hour (restart required)" category: "Time" var: initial_hour min: 0.0 max: 23.0;
-    parameter "Seconds per cycle (1 detailed / 60 fast / 3600 coarse)" category: "Time" var: step <- 1.0 among: [1.0,5.0,10.0,30.0,60.0,3600.0];
+    parameter "Seconds per cycle (60 = 1 min / 600 = 10 min; restart required)" category: "Time" var: step among: [1.0,5.0,10.0,30.0,60.0,600.0,3600.0];
     parameter "Vehicle icon size (px)" category: "Display" var: vehicle_icon_size_px min: 16.0 max: 80.0 slider: true;
 
     parameter "Cars (restart required)" category:"Fleet" var:cars min:0 max:5000;
@@ -379,9 +378,6 @@ experiment "Run me" type: gui{
     output synchronized: ranr_render   {
         layout 1 consoles: false controls: true navigator: false editors: false toolbars: false;
         monitor "Base fleet total" value:cars+privates+taxis;
-        monitor "Base opportunities/min (derived)" value:(privates*ranr_private_frequency+taxis*ranr_taxi_frequency)/1440.0;
-        monitor "Charging opportunities" value:ranr_opportunity_count;
-        monitor "Activated opportunities" value:ranr_activated_count;
         monitor "Inbound vehicles" value:length(mobility_population where each.ranr_inbound);
         monitor "Activity" value: activity_status refresh: ranr_render;
         monitor "RANR error" value: ranr_error refresh: ranr_render;
@@ -404,6 +400,9 @@ experiment "Run me" type: gui{
         monitor "Electric taxis" value:length(taxi_ev) refresh:ranr_render;
         monitor "Rush departures (existing vehicles)" value: rush_activity_departures refresh: ranr_render;
         monitor "EV mean SOC (%)" value: mean_ev_soc refresh: ranr_render;
+        monitor "Charging intents" value:length(ranr_intents) refresh:ranr_render;
+        monitor "Charging retries" value:length(ranr_attempts where (int(each["attempt"])>1)) refresh:ranr_render;
+        monitor "Stranded EVs" value:length(ev_population where each.ranr_stranded) refresh:ranr_render;
         monitor "Charging requests (cumulative)" value: ranr_total_recommendations refresh: ranr_render;
         monitor "Inbound EVs" value: inbound_ev_count refresh: ranr_render;
         monitor "Waiting EVs" value: waiting_ev_count refresh: ranr_render;
@@ -475,6 +474,7 @@ experiment "Collect training data" type:gui parent:"Run me" {
     }
     output {
         monitor "Calibration status" value:ranr_collection_status;
+        monitor "Collection duration (days)" value:(ranr_warmup+ranr_measure+ranr_deadline)/1440.0;
     }
 }
 

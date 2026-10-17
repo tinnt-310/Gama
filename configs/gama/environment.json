@@ -1,64 +1,8 @@
 {
-  "environment_version": "persistent-controlled-distributed-3",
+  "environment_version": "persistent-soc-activity-6",
   "cars": 3000,
   "private_evs": 1000,
   "electric_taxis": 700,
-  "private_opportunities_per_day": 0.2,
-  "taxi_opportunities_per_day": 0.8,
-  "private_hour_weights": [
-    0,
-    0,
-    0,
-    0,
-    0,
-    1,
-    2,
-    3,
-    3,
-    2,
-    2,
-    2,
-    2,
-    2,
-    2,
-    3,
-    4,
-    5,
-    5,
-    4,
-    3,
-    1,
-    0,
-    0
-  ],
-  "taxi_hour_weights": [
-    1,
-    1,
-    1,
-    1,
-    1,
-    2,
-    3,
-    4,
-    4,
-    3,
-    3,
-    3,
-    3,
-    3,
-    3,
-    4,
-    5,
-    5,
-    5,
-    4,
-    3,
-    2,
-    2,
-    1
-  ],
-  "eligibility_soc": 30.0,
-  "target_soc": 80.0,
   "initial_soc_low": 40.0,
   "initial_soc_high": 100.0,
   "rush_extra_percent": 30.0,
@@ -79,8 +23,8 @@
   "consumption_kwh_km": 0.18,
   "charge_efficiency": 0.9,
   "battery_capacity_kwh": 60.0,
-  "observation_version": "station-observation-3",
-  "objective_version": "opportunity-service-3",
+  "observation_version": "station-observation-4",
+  "objective_version": "intent-service-5",
   "safety_soc_reserve": 5.0,
   "connector_assumption": "generic-public; provisional universal compatibility, not surveyed",
   "temperature": 0.2,
@@ -88,8 +32,6 @@
   "min_send_seconds": 10.0,
   "event_workload_minutes": 5.0,
   "event_exposure_count": 5,
-  "failure_beta": 1.0,
-  "energy_beta": 1.0,
   "cost_scales": [
     60.0,
     60.0,
@@ -97,5 +39,110 @@
     120.0,
     60.0
   ],
-  "smoothing": "off"
+  "smoothing": "off",
+  "energy_retry_minutes": 5.0,
+  "soc_threshold_intervals": [
+    [
+      10,
+      20
+    ],
+    [
+      20,
+      30
+    ],
+    [
+      30,
+      40
+    ],
+    [
+      40,
+      50
+    ],
+    [
+      50,
+      60
+    ],
+    [
+      60,
+      70
+    ]
+  ],
+  "private_threshold_probabilities": [
+    0.05,
+    0.2,
+    0.35,
+    0.25,
+    0.1,
+    0.05
+  ],
+  "taxi_threshold_probabilities": [
+    0.05,
+    0.1,
+    0.2,
+    0.35,
+    0.2,
+    0.1
+  ],
+  "private_target_soc_values": [
+    80,
+    85,
+    90,
+    95,
+    100
+  ],
+  "private_target_probabilities": [
+    0.3,
+    0.25,
+    0.25,
+    0.1,
+    0.1
+  ],
+  "taxi_target_soc_values": [
+    70,
+    80,
+    90,
+    95,
+    100
+  ],
+  "taxi_target_probabilities": [
+    0.1,
+    0.25,
+    0.35,
+    0.15,
+    0.15
+  ],
+  "energy_retry_max_minutes": 30.0,
+  "energy_urgent_soc": 10.0,
+  "taxi_break_interval_minutes": 180.0,
+  "taxi_break_minutes": 30.0,
+  "taxi_passenger_interval_minutes": 60.0,
+  "private_work_start_hours": [
+    6.0,
+    9.0
+  ],
+  "private_work_end_hours": [
+    16.0,
+    19.0
+  ],
+  "taxi_shift_start_hours": [
+    5.0,
+    7.0
+  ],
+  "taxi_shift_end_hours": [
+    20.0,
+    24.0
+  ],
+  "distribution_note": "Configurable research assumptions; not empirically verified driver statistics.",
+  "taxi_expected_km_per_operating_hour": 20.0,
+  "taxi_booking_notice_minutes": 15.0,
+  "objective_config_hash": "0b32b80393e5e0304be5fc512f2ae6f36208ab0817954c697fb804ffd5f0fea8",
+  "station_aggregate_power_kw": {},
+  "taper_soc": [
+    0.0,
+    100.0
+  ],
+  "taper_factors": [
+    1.0,
+    1.0
+  ]
 }

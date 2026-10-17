@@ -16,21 +16,22 @@ from ranr.gama.headless import (
     ENVIRONMENT_VERSION,
 )
 from ranr.gama import gui_collection as gui
+from gama_ledger_fixture import ledger_fixture, fitness_fixture
+from ranr.gama.contracts import OBJECTIVE_CONFIG_HASH
 
 
 class UnifiedEnvironment(unittest.TestCase):
-    def test_fleet_rate_and_invalid_configuration(self):
+    def test_fleet_and_invalid_configuration(self):
         config = RunConfig(development=True)
         self.assertEqual(
             config.background_cars + config.private_evs + config.electric_taxis, 4700
         )
-        self.assertAlmostEqual(config.demand_rate * 1440, 760)
+        self.assertEqual(config.step_seconds, 60)
+        self.assertEqual(config.warmup_minutes + config.measure_minutes + config.deadline_minutes, 4320)
         for kwargs in (
             {"private_evs": -1},
             {"electric_taxis": 2.5},
-            {"private_frequency": float("nan")},
             {"rush_extra_percent": 31},
-            {"soc_threshold": 90, "target_soc": 80},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 RunConfig(development=True, **kwargs)
@@ -56,10 +57,21 @@ class GuiCollection(unittest.TestCase):
         )
         self.source_patch.start()
         self.addCleanup(self.source_patch.stop)
+        self.physical_patch = patch.object(gui, "validate_physical_records", return_value={"unit_fixture": True})
+        self.physical_patch.start()
+        self.addCleanup(self.physical_patch.stop)
+        for target,value in [("ranr.gama.evidence.provenance", {"fixture":"unit-only"}),
+                             ("ranr.gama.evidence.validate_physical_records", {"unit_fixture":True})]:
+            mock = patch(target,return_value=value)
+            mock.start()
+            self.addCleanup(mock.stop)
         self.record = gui.prepare(self.folder)
 
     def finish_files(self):
         config = self.record["config"]
+        (self.folder/'daily_statistics.csv').write_text('Day,Station_Name\n'+''.join(f'{day},cs_{sid}\n' for day in range(1,4) for sid in range(11)))
+        for name,header in [('calibration_snapshots.csv','snapshot'),('calibration_contexts.csv','context'),('calibration_fractions.csv','release_fraction,energy_fraction')]:
+            (self.folder/name).write_text(header+'\n')
         actual = dict(
             config,
             run_id=self.folder.name,
@@ -75,7 +87,7 @@ class GuiCollection(unittest.TestCase):
                 "run_id": self.folder.name,
                 "status": "complete",
                 "outcome_count": 1,
-                "finished_min": 1080,
+                "finished_min": config["warmup_minutes"] + config["measure_minutes"] + config["deadline_minutes"],
             },
         )
         write_json(
@@ -85,14 +97,14 @@ class GuiCollection(unittest.TestCase):
                 "all_demand_count": 1,
                 "all_outcome_count": 1,
                 "objective": 0.0,
-                "objective_components": {"version":"opportunity-service-3","time_component":0.0,"tail_component":0.0,"queue_component":0.0,"failure_component":0.0,"energy_component":0.0},
+                "objective_components": {"version":"intent-service-5","time_component":0.0,"tail_component":0.0,"queue_component":0.0,"failure_component":0.0,"energy_component":0.0},
             },
         )
         write_json(
             self.folder / "outcomes.json",
             [
                 {
-                    "request_id": "r1",
+                    "request_id": "r1", "intent_id": "intent_10000_1",
                     "key":1,"vehicle_id":10000,"travel_min":5.0,"waiting_min":0.0,"charging_min":20.0,"service_time_min":25.0,
                     "status": "completed",
                     "requested_kwh": 20,
@@ -102,16 +114,54 @@ class GuiCollection(unittest.TestCase):
         )
         (self.folder / "events.csv").write_text("request_id,terminal_record,time_min,leg\nr1,arrival,5.0,0\n")
         (self.folder / "demand.csv").write_text("request_id\nr1\n")
-        for name in ("opportunities.json", "traffic_plan.json", "initial_fleet.json"):
+        for name in ("activity_plan.json", "vehicle_traits.json", "traffic_plan.json", "initial_fleet.json"):
             write_json(self.folder / name, [])
+        intents, attempts, outcomes, resolutions = ledger_fixture(created=0.,finished=25.)
+        outcomes[0].update(travel_min=5.,waiting_min=0.,charging_min=20.,service_time_min=25.)
+        resolutions[0].update(travel_min=5.,waiting_min=0.,charging_min=20.,other_elapsed_min=0.)
+        for name,rows in [('charging_intents.json',intents),('request_attempts.json',attempts),('outcomes.json',outcomes),('intent_outcomes.json',resolutions)]:
+            write_json(self.folder/name,rows)
+        write_json(self.folder/'initial_fleet.json',[dict(id=10000,kind='private')])
+        write_json(self.folder/'mobility_outcomes.json',[])
+        write_json(self.folder/'stranded_ev_ids.json',[])
+        write_json(self.folder/'charging_needs.json',[dict(intent_id='i1',vehicle_id=10000,at=0.)])
+        write_json(self.folder/'intent_time_intervals.json',[
+            dict(intent_id='i1',state='travel',begin=0.,end=5.),
+            dict(intent_id='i1',state='charging',begin=5.,end=25.)])
+        metrics=json.loads((self.folder/'metrics.json').read_text())
+        metrics.update(fitness_fixture(seed=config['seed']),planned_ev_days=config['measure_minutes']/1440.)
+        metrics['objective_components']=dict(version='intent-service-5',objective_config_hash=OBJECTIVE_CONFIG_HASH,
+            fitness_valid=True,time_component=0.,tail_component=0.,queue_component=0.)
+        write_json(self.folder/'metrics.json',metrics)
 
-        opportunity = {"key":1,"vehicle_id":10000,"at":0.0,"cause":"scheduled"}
-        write_json(self.folder/"opportunities.json", [opportunity])
-        write_json(self.folder/"opportunity_outcomes.json", [{**opportunity,"status":"activated"}])
+
+    def test_removing_whole_intent_does_not_hide_physical_need(self):
+        self.finish_files()
+        for name in ('charging_intents.json','request_attempts.json','outcomes.json','intent_outcomes.json'):
+            write_json(self.folder/name,[])
+        metrics=json.loads((self.folder/'metrics.json').read_text());metrics.update(all_demand_count=0,all_outcome_count=0)
+        write_json(self.folder/'metrics.json',metrics)
+        marker=json.loads((self.folder/'completion.json').read_text());marker['outcome_count']=0
+        write_json(self.folder/'completion.json',marker)
+        (self.folder/'demand.csv').write_text('request_id\n')
+        with self.assertRaisesRegex(ValueError,'physical charging need'):
+            gui.complete(self.folder)
+
+    def test_missing_active_interval_is_invalid(self):
+        self.finish_files()
+        write_json(self.folder/'intent_time_intervals.json',[])
+        with self.assertRaisesRegex(ValueError,'time accounting'):
+            gui.complete(self.folder)
 
     def test_registration_refuses_overwrite(self):
         with self.assertRaises(FileExistsError):
             gui.prepare(self.folder)
+
+    def test_gui_collection_registers_72_hours_with_display(self):
+        config = self.record["config"]
+        self.assertEqual(config["warmup_minutes"] + config["measure_minutes"] + config["deadline_minutes"], 4320)
+        self.assertEqual(config["step_seconds"], 60)
+        self.assertTrue(config["render"] and config["trace"] and config["calibrating"])
 
     def test_stopped_episode_and_missing_seed_are_rejected(self):
         with self.assertRaises(FileNotFoundError):
@@ -129,6 +179,51 @@ class GuiCollection(unittest.TestCase):
         (self.folder / "demand.csv").write_text("modified")
         with self.assertRaisesRegex(ValueError, "artifact changed"):
             checked_result(self.folder, {})
+
+    def test_gama_float_rounding_is_accepted(self):
+        self.record["config"]["compliance"] = 1 / 3
+        write_json(self.folder / "manifest.json", self.record)
+        self.finish_files()
+        path = self.folder / "configuration.json"
+        actual = json.loads(path.read_text())
+        actual["compliance"] = 0.33333333
+        write_json(path, actual)
+        self.assertEqual(gui.complete(self.folder)["status"], "complete")
+
+    def test_energy_intent_is_validated_and_sealed(self):
+        self.finish_files()
+        record = gui.complete(self.folder)
+        self.assertIn("charging_intents.json", record["artifact_hashes"])
+        self.assertIn("request_attempts.json", record["artifact_hashes"])
+        self.assertNotIn("opportunities.json", record["artifact_hashes"])
+
+    def test_missing_or_duplicate_energy_intent_is_rejected(self):
+        self.finish_files()
+        path = self.folder / "charging_intents.json"
+        intents = json.loads(path.read_text())
+        write_json(path, intents * 2)
+        with self.assertRaisesRegex(ValueError, "Duplicate intent"):
+            gui.complete(self.folder)
+        write_json(path, [])
+        with self.assertRaisesRegex(ValueError, "Missing intent"):
+            gui.complete(self.folder)
+
+    def test_real_configuration_changes_are_rejected(self):
+        for field, value in (
+            ("compliance", 0.7),
+            ("initial_private_evs", self.record["config"]["private_evs"] + 1e-6),
+            ("rush_enabled", 1),
+            ("case", "high"),
+            ("packet_loss", 0.1),
+        ):
+            with self.subTest(field=field):
+                self.finish_files()
+                path = self.folder / "configuration.json"
+                actual = json.loads(path.read_text())
+                actual[field] = value
+                write_json(path, actual)
+                with self.assertRaisesRegex(ValueError, "configuration mismatch"):
+                    gui.complete(self.folder)
 
     def test_wrong_source_or_physical_configuration_is_rejected(self):
         self.finish_files()
@@ -217,7 +312,7 @@ class GuiCollection(unittest.TestCase):
                     {
                         "context": json.dumps(
                             {
-                                "request_id": "r1",
+                                "request_id": "r1", "intent_id": "intent_10000_1",
                                 "issuer": 0,
                                 "chosen": 0,
                                 "travel": [5.0] * 11,

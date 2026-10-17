@@ -33,15 +33,17 @@ global {
     float ranr_deadline <- 360.0;
     float ranr_horizon <- 120.0;
     float ranr_ttl <- 180.0;
-    string ranr_observation_version <- "station-observation-3";
-    string ranr_objective_version <- "opportunity-service-3";
+    string ranr_observation_version <- "station-observation-4";
+    string ranr_objective_version <- "intent-service-5";
     float ranr_temperature <- float(ranr_environment["temperature"]);
     float ranr_safety_soc <- float(ranr_environment["safety_soc_reserve"]);
     float ranr_min_send <- float(ranr_environment["min_send_seconds"])/60.0;
     float ranr_event_workload <- float(ranr_environment["event_workload_minutes"]);
     int ranr_event_exposure <- int(ranr_environment["event_exposure_count"]);
-    float ranr_failure_beta <- float(ranr_environment["failure_beta"]);
-    float ranr_energy_beta <- float(ranr_environment["energy_beta"]);
+    string ranr_objective_config_hash <- string(ranr_environment["objective_config_hash"]);
+    float ranr_energy_tolerance <- 1e-6;
+    list<float> ranr_taper_soc <- list<float>(ranr_environment["taper_soc"]);
+    list<float> ranr_taper_factors <- list<float>(ranr_environment["taper_factors"]);
     string ranr_station_events_file <- "";
     float ranr_duplicate_probability <- 0.0;
     float ranr_partition_begin <- -1.0;
@@ -59,14 +61,9 @@ global {
     float ranr_assumed_compliance <- 0.6;
     float ranr_assumed_defer <- 0.05;
     float ranr_arrival_probability <- 1.0;
+    float ranr_arrival_lookback <- 0.0; // Empirical arrival support, independent of service deadline.
     float ranr_prior_background_rate <- 0.015;
     float ranr_prior_rate <- 0.06; // Per station/minute; official runs replace with GAMA train calibration.
-    float ranr_private_frequency <- float(ranr_environment["private_opportunities_per_day"]);
-    float ranr_taxi_frequency <- float(ranr_environment["taxi_opportunities_per_day"]);
-    float target_soc <- float(ranr_environment["target_soc"]);
-    float ranr_soc_threshold <- float(ranr_environment["eligibility_soc"]);
-    list<float> ranr_private_hours <- list<float>(ranr_environment["private_hour_weights"]);
-    list<float> ranr_taxi_hours <- list<float>(ranr_environment["taxi_hour_weights"]);
     bool ranr_collect_gui <- false;
     int ranr_collection_seed <- 800001;
     string ranr_collection_status <- "Not collected";
@@ -79,7 +76,6 @@ global {
     float ranr_snapshot_width <- 5.0;
     float ranr_energy_width <- 5.0;
     float ranr_broadcast_period <- float(ranr_environment["broadcast_minutes"]);
-    int ranr_burst_size <- 100;
     list<float> ranr_parameters <- [];
     map<string,unknown> ranr_loaded_model <- [];
     bool ranr_candidate_loaded <- false;
@@ -115,8 +111,10 @@ global {
         return "'"+replace(value,"'","'\"'\"'")+"'";
     }
     string ranr_gui_bridge(string operation) {
-        file project_directory <- folder(ranr_project_prefix);
-        return command("./.venv/bin/python scripts/gui_calibration.py "+operation+" "+ranr_shell_quote(operation="model" ? ranr_parameter_file : ranr_output),project_directory.path);
+        // Resolve a child resource: GAMA's GUI workspace lookup rejects a bare project root.
+        file scripts_directory <- folder(ranr_project_prefix+"scripts");
+        string project_directory <- scripts_directory.path+"/..";
+        return command("./.venv/bin/python scripts/gui_calibration.py "+operation+" "+ranr_shell_quote(operation="model" ? ranr_parameter_file : ranr_output),project_directory);
     }
     action ranr_load_candidate {
         if ranr_candidate_loaded { return nil; }
@@ -130,9 +128,10 @@ global {
         } else {
             if !file_exists(ranr_parameter_file) { ranr_error <- "Parameter file does not exist: "+ranr_parameter_file; return nil; }
             ranr_loaded_model <- json_file(ranr_parameter_file).contents;
-            if !(ranr_loaded_model["schema"]="gama-ranr-v3" and ranr_loaded_model["backend"]="GAMA" and ranr_loaded_model["method"]=ranr_method) {
+            if !(ranr_loaded_model["schema"]="gama-ranr-v4" and ranr_loaded_model["backend"]="GAMA" and ranr_loaded_model["method"]=ranr_method) {
                 ranr_error <- "Parameter schema/backend/method mismatch"; return nil;
             }
+            if string(ranr_loaded_model["objective_config_hash"])!=ranr_objective_config_hash or string(ranr_loaded_model["objective_version"])!=ranr_objective_version { ranr_error <- "Objective specification mismatch"; return nil; }
             if string(ranr_loaded_model["environment_version"])!=ranr_environment_version { ranr_error <- "Model environment version mismatch; recalibrate and retrain"; return nil; }
             list<string> features <- ranr_loaded_model["features"];
             if features!=["T_travel_charge","W_mean","W_P95","H","U"] { ranr_error <- "Parameter feature order mismatch"; return nil; }
@@ -150,13 +149,11 @@ global {
             if bool(ranr_loaded_model["training_completed"]) {
                 map<string,unknown> config <- ranr_loaded_model["config"];
                 if int(config["background_cars"])!=cars or int(config["private_evs"])!=privates or int(config["electric_taxis"])!=taxis or
-                   float(config["private_frequency"])!=ranr_private_frequency or float(config["taxi_frequency"])!=ranr_taxi_frequency or
                    float(config["initial_hour"])!=initial_hour or float(config["step_seconds"])!=step or
                    float(config["rush_extra_percent"])!=rush_extra_percent or bool(config["rush_enabled"])!=have_rush or
-                   float(config["soc_threshold"])!=ranr_soc_threshold or float(config["target_soc"])!=target_soc or
                    float(config["ev_speed_kmh"])!=ranr_ev_speed or float(config["car_speed_kmh"])!=ranr_car_speed or
                    float(config["temperature"])!=ranr_temperature or float(config["p2p_interval"])!=ranr_broadcast_period or float(config["min_send_seconds"])/60.0!=ranr_min_send or
-                   string(config["stabilization"])!=ranr_stabilization or string(config["behavior_case"])!=ranr_behavior_case or float(config["failure_beta"])!=ranr_failure_beta or float(config["energy_beta"])!=ranr_energy_beta or
+                   string(config["stabilization"])!=ranr_stabilization or string(config["behavior_case"])!=ranr_behavior_case or
                    int(config["samples"])!=ranr_samples or float(config["deadline_minutes"])!=ranr_deadline {
                     ranr_error <- "Selected configuration differs from trained model"; return nil;
                 }
@@ -199,7 +196,7 @@ global {
         list<map<string,unknown>> cohorts <- [];
         list<map<string,unknown>> source <- input["exposure"];
         loop value over: source {
-            map<string,unknown> cohort <- ranr_record(value); cohort["travel"] <- copy(value["travel"]); cohorts << cohort;
+            map<string,unknown> cohort <- ranr_record(value); cohort["travel"] <- copy(value["travel"]); if "energy_by_station" in value.keys { cohort["energy_by_station"] <- copy(value["energy_by_station"]); } cohorts << cohort;
         }
         result["exposure"] <- cohorts;
         if "resolutions" in input.keys {
@@ -211,6 +208,9 @@ global {
     }
     action ranr_index_calibration {
         ranr_sorted_eta <- ranr_eta_factors sort_by each;
+        float longest <- 0.0;
+        loop context over:ranr_arrival_prior { longest <- max(longest,max(list<float>(context["travel"]))); }
+        ranr_arrival_lookback <- max(step/60.0,longest*max(ranr_eta_factors));
         ranr_contexts_by_issuer <- []; ranr_priors_by_sid <- []; ranr_prior_load_by_sid <- []; ranr_scenario_cache <- []; ranr_scenario_cache_key <- "";
         loop context over: ranr_arrival_prior {
             int issuer <- int(context["issuer"]);
@@ -245,7 +245,7 @@ global {
             map<string,unknown> snapshot <- snapshots[sid];
             if ("operational" in snapshot.keys and !bool(snapshot["operational"])) or
                ("connectors" in snapshot.keys and "connector" in request.keys and !(string(request["connector"]) in list<string>(snapshot["connectors"]))) or
-               sum(list<float>(snapshot["powers"]))<=0.0 { travel[sid] <- -1.0; }
+               sum(list<float>(snapshot["powers"]))<=0.0 or ("aggregate_kw" in snapshot.keys and float(snapshot["aggregate_kw"])<=0.0) { travel[sid] <- -1.0; }
         }
         return travel;
     }
@@ -332,32 +332,119 @@ global {
         int lo <- int(floor(position)); int hi <- int(ceil(position));
         return ordered[lo]+(position-lo)*(ordered[hi]-ordered[lo]);
     }
-    // Strict FIFO heterogeneous independent ports, including EV acceptance limits.
-    map<string,unknown> ranr_shadow(list<float> powers,list<float> releases,list<map<string,unknown>> jobs) {
-        assert length(powers)>0 and length(powers)=length(releases);
-        list<float> free_at <- copy(releases);
-        loop j from:0 to:length(powers)-1 { if powers[j]<=0.0 { free_at[j] <- 1e100; } } list<float> waits <- []; list<float> starts <- []; list<float> services <- []; list<float> nominal <- []; list<float> delivered <- [];
-        float last_start <- 0.0; float tick <- step/60.0;
-        loop job over: jobs {
-            float arrival <- tick*ceil(float(job["at"])/tick-1e-10);
-            float lower <- max(arrival,last_start); int selected <- 0;
-            loop j from: 1 to: length(powers)-1 {
-                if length(powers)=1 { break; }
-                float a <- max(free_at[j],lower); float b <- max(free_at[selected],lower);
-                if a < b-1e-10 or (abs(a-b)<=1e-10 and (min(powers[j],float(job["max_kw"]))>min(powers[selected],float(job["max_kw"])) or (min(powers[j],float(job["max_kw"]))=min(powers[selected],float(job["max_kw"])) and powers[j]>powers[selected]))) { selected <- j; }
+    float ranr_acceptance(float max_kw,float soc) {
+        float factor <- ranr_taper_factors[0];
+        loop j from:0 to:length(ranr_taper_soc)-1 { if soc>=ranr_taper_soc[j]-1e-9 { factor <- ranr_taper_factors[j]; } }
+        return max(0.0,max_kw*factor);
+    }
+    list<float> ranr_allocate_power(list<float> ports,list<float> limits,float aggregate_kw) {
+        assert length(ports)=length(limits) and aggregate_kw>=0.0;
+        list<float> power <- [];
+        loop j from:0 to:length(ports)-1 { power << max(0.0,min(ports[j],limits[j])); }
+        float demand <- sum(power);
+        return demand>aggregate_kw and demand>0.0 ? power collect (each*aggregate_kw/demand) : power;
+    }
+    // Shared event integration: the physical station supplies only its current
+    // port owners; prediction and workload pressure add FIFO waiting jobs.
+    map<string,unknown> ranr_service_schedule(list<float> powers,list<map<string,unknown>> source_jobs,float aggregate_kw,float until_min) {
+        float tick <- step/60.0; float eta <- charge_efficiency;
+        float capacity <- float(ranr_environment["battery_capacity_kwh"]);
+        list<map<string,unknown>> jobs <- []; list<int> owner <- powers collect -1;
+        list<float> free_after <- powers collect 0.0;
+        list<float> starts <- []; list<float> finishes <- []; list<float> received <- []; list<float> remaining <- [];
+        loop source_job over:source_jobs {
+            map<string,unknown> job <- ranr_record(source_job);
+            job["soc"] <- "soc" in job.keys ? float(job["soc"]) : 0.0;
+            job["at"] <- max(0.0,tick*ceil(float(job["at"])/tick-1e-10));
+            jobs << job; starts << -1.0; finishes << -1.0; received << 0.0; remaining << float(job["energy"]);
+        }
+        int count <- length(jobs); float clock <- 0.0; int iterations <- 0;
+        loop j from:0 to:count-1 {
+            if count=0 { break; }
+            if "port" in jobs[j].keys {
+                int port_id <- int(jobs[j]["port"]); assert owner[port_id]=-1;
+                owner[port_id] <- j; starts[j] <- 0.0;
             }
-            float begin <- max(free_at[selected],lower);
-            if max(powers)<=0.0 { begin <- 1e100; }
-            float deadline <- "deadline" in job.keys ? float(job["deadline"]) : 1e100;
-            if begin>=deadline {
-                starts << deadline; nominal << 0.0; services << 0.0; delivered << 0.0; waits << max(0.0,deadline-arrival); last_start <- max(last_start,deadline); continue;
+        }
+        loop while: count>0 and clock<until_min-1e-10 and iterations<100000 {
+            iterations <- iterations+1;
+            // Observed physical cancellations are distinct from evaluation deadlines.
+            loop j from:0 to:count-1 {
+                float service_until <- "service_until" in jobs[j].keys ? float(jobs[j]["service_until"]) : 1e100;
+                if finishes[j]<0.0 and clock>=service_until-1e-9 {
+                    finishes[j] <- clock;
+                    loop port_id from:0 to:length(powers)-1 { if owner[port_id]=j { owner[port_id] <- -1; free_after[port_id] <- clock; } }
+                }
             }
-            float service_minutes <- 60.0*float(job["energy"])/(charge_efficiency*min(powers[selected],float(job["max_kw"])));
-            free_at[selected] <- min(deadline,begin+tick*max(1.0,ceil(service_minutes/tick-1e-10)));
-            nominal << service_minutes; services << max(0.0,min(service_minutes,deadline-begin)); delivered << min(float(job["energy"]),max(0.0,deadline-begin)*charge_efficiency*min(powers[selected],float(job["max_kw"]))/60.0);
-            starts << begin; waits << max(0.0,begin-arrival); last_start <- begin;
+            // Strict FIFO, fastest available compatible port, identical to process_queue.
+            loop j from:0 to:count-1 {
+                if starts[j]>=0.0 or finishes[j]>=0.0 or float(jobs[j]["at"])>clock+1e-9 { continue; }
+                int selected <- -1;
+                loop port_id from:0 to:length(powers)-1 {
+                    if owner[port_id]<0 and free_after[port_id]<=clock+1e-9 and powers[port_id]>0.0 and (selected<0 or powers[port_id]>powers[max(0,selected)]) { selected <- port_id; }
+                }
+                if selected<0 { break; }
+                starts[j] <- clock; owner[selected] <- j;
+            }
+            list<float> limits <- [];
+            loop port_id from:0 to:length(powers)-1 { int j <- owner[port_id]; limits << (j<0 ? 0.0 : ranr_acceptance(float(jobs[j]["max_kw"]),float(jobs[j]["soc"]))); }
+            list<float> rates <- ranr_allocate_power(powers,limits,aggregate_kw);
+            float service_interval_min <- until_min-clock;
+            bool future <- false;
+            loop j from:0 to:count-1 {
+                float service_until <- "service_until" in jobs[j].keys ? float(jobs[j]["service_until"]) : 1e100;
+                if finishes[j]<0.0 and service_until>clock+1e-9 and service_until<until_min { service_interval_min <- min(service_interval_min,service_until-clock); future <- true; }
+                if starts[j]<0.0 and finishes[j]<0.0 and float(jobs[j]["at"])>clock+1e-9 { service_interval_min <- min(service_interval_min,float(jobs[j]["at"])-clock); future <- true; }
+            }
+            loop port_id from:0 to:length(powers)-1 {
+                if free_after[port_id]>clock+1e-9 { service_interval_min <- min(service_interval_min,free_after[port_id]-clock); future <- true; }
+                int j <- owner[port_id]; float rate <- rates[port_id];
+                if j>=0 and rate>0.0 {
+                    future <- true; service_interval_min <- min(service_interval_min,60.0*remaining[j]/(eta*rate));
+                    loop boundary over:ranr_taper_soc where (each>float(jobs[j]["soc"])+1e-7) { service_interval_min <- min(service_interval_min,60.0*(boundary-float(jobs[j]["soc"]))*capacity/(100.0*eta*rate)); }
+                }
+            }
+            if !future or service_interval_min<=1e-10 { break; }
+            loop port_id from:0 to:length(powers)-1 {
+                int j <- owner[port_id];
+                if j<0 { continue; }
+                float energy <- min(remaining[j],eta*rates[port_id]*service_interval_min/60.0);
+                remaining[j] <- remaining[j]-energy; received[j] <- received[j]+energy;
+                jobs[j]["soc"] <- float(jobs[j]["soc"])+100.0*energy/capacity;
+                if remaining[j]<=1e-9 {
+                    finishes[j] <- clock+service_interval_min; owner[port_id] <- -1;
+                    free_after[port_id] <- tick*ceil((clock+service_interval_min)/tick-1e-10);
+                }
+            }
+            clock <- clock+service_interval_min;
+            if empty(remaining where (each>1e-9)) { break; }
+        }
+        list<float> waits <- []; list<float> services <- [];
+        loop j from:0 to:count-1 {
+            if count=0 { break; }
+            waits << (starts[j]>=0.0 ? max(0.0,starts[j]-float(jobs[j]["at"])) : max(0.0,(finishes[j]>=0.0 ? finishes[j] : min(until_min,clock))-float(jobs[j]["at"])));
+            services << (finishes[j]>=0.0 ? max(0.0,finishes[j]-starts[j]) : (starts[j]>=0.0 ? max(0.0,clock-starts[j]) : 0.0));
         }
         ranr_queue_calls <- ranr_queue_calls+1;
-        return ["free"::free_at,"waits"::waits,"starts"::starts,"total"::sum(waits),"services"::services,"nominal_services"::nominal,"delivered"::delivered];
+        return ranr_record(["starts"::starts,"finishes"::finishes,"delivered"::received,"remaining"::remaining,"services"::services,"waits"::waits,"nominal_services"::services,
+            "total"::sum(waits),"cleared"::empty(remaining where (each>1e-9)),"duration"::clock,"iterations"::iterations]);
     }
+    map<string,unknown> ranr_shadow_limited(list<float> powers,list<float> releases,list<map<string,unknown>> jobs,float aggregate_kw) {
+        list<map<string,unknown>> backlog <- [];
+        loop port_id from:0 to:length(powers)-1 {
+            if releases[port_id]>1e-9 { backlog << ["port"::port_id,"at"::0.0,"energy"::(charge_efficiency*powers[port_id]*releases[port_id]/60.0),"max_kw"::powers[port_id]]; }
+        }
+        int offset <- length(backlog); backlog <- backlog+jobs;
+        map<string,unknown> result <- ranr_service_schedule(powers,backlog,aggregate_kw,1e6);
+        loop field_name over:["starts","finishes","delivered","remaining","services","waits","nominal_services"] {
+            list<float> values <- result[field_name]; list<float> retained <- [];
+            if offset<length(values) { loop j from:offset to:length(values)-1 { retained << values[j]; } } result[field_name] <- retained;
+        }
+        result["total"] <- sum(list<float>(result["waits"]));
+        return result;
+    }
+    map<string,unknown> ranr_shadow(list<float> powers,list<float> releases,list<map<string,unknown>> jobs) {
+        return ranr_shadow_limited(powers,releases,jobs,sum(powers));
+    }
+
 }

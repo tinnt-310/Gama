@@ -4,14 +4,8 @@ import "Evaluation.gaml"
 global {
     bool ranr_initialized <- false;
     bool ranr_done <- false;
-    list<float> ranr_locked_environment <- [];
-    string ranr_locked_design <- "";
-    string ranr_locked_method <- "";
-    int ranr_locked_samples <- 0;
-    float ranr_locked_step <- 0.0;
-    float ranr_locked_deadline <- 0.0;
-    float ranr_locked_ev_speed <- 0.0;
-    float ranr_locked_car_speed <- 0.0;
+    bool ranr_failed <- false;
+    map<string,unknown> ranr_locked_settings <- [];
     float ranr_init_ms <- 0.0;
     float ranr_gis_ms <- 0.0;
     float ranr_next_flush <- 0.0;
@@ -31,6 +25,7 @@ global {
     int ranr_message_bytes <- 0;
     int ranr_received_count <- 0;
     int ranr_peak_queue <- 0;
+    float ranr_queue_pressure <- 0.0;
     list<map<string,unknown>> ranr_queue_history <- [];
     float ranr_next_queue_log <- 0.0;
     float ranr_weight_h_sum <- 0.0;
@@ -48,6 +43,44 @@ global {
     string ranr_context_buffer <- "";
     string ranr_fraction_buffer <- "";
 
+    map<string,unknown> ranr_live_settings {
+        // Snapshot inputs, not evolving populations/caches. Copy lists to detect in-place edits.
+        // Rendering and icon size are intentionally adjustable while running.
+        return ranr_record(["enabled"::ranr_enabled,"method"::ranr_method,"case"::ranr_case,
+            "seed"::float(seed),"rng"::rng,"master_seed"::ranr_master_seed,"mobility_seed"::mobility_master_seed,
+            "step_seconds"::step,"warmup_minutes"::ranr_warmup,"measure_minutes"::ranr_measure,"deadline_minutes"::ranr_deadline,
+            "initial_hour"::initial_hour,"schedule_start_hour"::schedule_start_hour,
+            "ev_speed_kmh"::ranr_ev_speed,"car_speed_kmh"::ranr_car_speed,"live_ev_speed"::ele_car_speed,"live_car_speed"::car_speed,
+            "cars"::cars,"private_evs"::privates,"electric_taxis"::taxis,"rush_enabled"::have_rush,"rush_extra_percent"::rush_extra_percent,
+            "consumption_kwh_km"::consumption_kwh_km,"charge_efficiency"::charge_efficiency,"battery_capacity_kwh"::battery_capacity_kwh,
+            "compliance"::ranr_true_compliance,"defer_probability"::ranr_true_defer,"decline_probability"::ranr_true_decline,"abandon_after_minutes"::ranr_abandon_after,
+            "delay_minutes"::ranr_delay,"packet_loss"::ranr_loss,"duplicate_probability"::ranr_duplicate_probability,"partition_begin"::ranr_partition_begin,"partition_end"::ranr_partition_end,
+            "temperature"::ranr_temperature,"p2p_interval"::ranr_broadcast_period,"min_send_minutes"::ranr_min_send,
+            "behavior_case"::ranr_behavior_case,"stabilization"::ranr_stabilization,"smoothing_alpha"::ranr_smoothing_alpha,"hysteresis_minutes"::ranr_hysteresis_minutes,
+            "objective_config_hash"::ranr_objective_config_hash,"horizon"::ranr_horizon,"ttl"::ranr_ttl,"samples"::ranr_samples,
+            "safety_soc"::ranr_safety_soc,"energy_retry_minutes"::ranr_energy_retry_minutes,"energy_retry_max_minutes"::ranr_energy_retry_max_minutes,"energy_urgent_soc"::ranr_energy_urgent_soc,"snapshot_width"::ranr_snapshot_width,"energy_width"::ranr_energy_width,
+            "event_workload"::ranr_event_workload,"event_exposure"::ranr_event_exposure,
+            "taper_soc"::copy(ranr_taper_soc),"taper_factors"::copy(ranr_taper_factors),"station_aggregate_power_kw"::copy(ranr_environment["station_aggregate_power_kw"]),"reference_power"::reference_power_kw,"reference_efficiency"::reference_efficiency,"lane_width"::lane_width,"keyed_driving"::keyed_driving,
+            "run_id"::ranr_run_id,"output"::ranr_output,"parameter_file"::ranr_parameter_file,"calibration_file"::ranr_calibration_file,"station_events"::ranr_station_events_file,
+            "parameters"::copy(ranr_parameters),"development"::ranr_development,"gui_preview"::ranr_gui_preview,"trace"::ranr_trace,
+            "calibrating"::ranr_calibrating,"collect_gui"::ranr_collect_gui,"collection_seed"::ranr_collection_seed,
+            "environment_version"::ranr_environment_version,"objective_version"::ranr_objective_version,"observation_version"::ranr_observation_version]);
+    }
+    action ranr_before_finish {
+        // Entry-point models can flush their own statistics before completion is sealed.
+    }
+    action ranr_load_outage_schedule {
+        ranr_outage_schedule <- [];
+        if ranr_station_events_file="" { return nil; }
+        // GAMA 1.9.3 wraps a top-level JSON array in the gama_contents entry.
+        map<string,unknown> events_document <- json_file(ranr_station_events_file).contents;
+        assert "gama_contents" in events_document.keys and events_document["gama_contents"] is list;
+        ranr_outage_schedule <- list<map<string,unknown>>(events_document["gama_contents"]);
+        loop outage over:ranr_outage_schedule {
+            outage["applied"] <- false;
+            assert int(outage["sid"])>=0 and int(outage["sid"])<11 and float(outage["factor"])>=0.0 and float(outage["factor"])<=1.0;
+        }
+    }
     action ranr_apply_outages(float at) {
         loop outage over:ranr_outage_schedule where (!bool(each["applied"]) and float(each["at"])<=at) {
             charging_station station <- ranr_stations[int(outage["sid"])];
@@ -79,33 +112,50 @@ global {
             if observed_outage or route_failed or energy_unsafe {
                 if destination!=nil and !(destination.ranr_sid in ev.ranr_unavailable_sids) { ev.ranr_unavailable_sids << destination.ranr_sid; }
                 if ev.ranr_leg>=2 { ask ev { do cancel_request("no_feasible_station"); } }
-                else {
-                    // Explicit cancellation reported to the original issuer by the EV.
-                    charging_station issuer <- ranr_stations[ev.ranr_issuer];
-                    ask issuer { do ranr_resolve(ev.ranr_token,"cancelled",at); }
-                    if destination!=nil { ask destination { do cancel_session(ev); } }
-                    do record_event(ev,"replan");
-                    ask ev { if session_state="waiting" { ranr_previous_wait <- waiting_time; } do unregister; final_target <- nil; ranr_leg <- ranr_leg+1; session_state <- "requested"; current_station <- nil; arrival_time <- -1.0; }
+                else if !ev.ranr_replan_pending {
+                    ev.ranr_replan_pending <- true;
+                    // Native compute_path snaps to its source vertex. Finish the current
+                    // road segment before installing a replacement path, so no distance
+                    // or battery energy is skipped by a mid-road replan.
+                    if ev.session_state="waiting" or ev.current_road=nil or ev.location distance_to ranr_vehicle_origin(ev).location<1e-6 {
+                        do ranr_commit_replan(ev,at);
+                    }
+
                 }
             }
         }
     }
+    action ranr_commit_replan(elecar ev,float at) {
+        charging_station issuer <- ranr_stations[ev.ranr_issuer];
+        ask issuer { do ranr_resolve(ev.ranr_token,"cancelled",at); }
+        if ev.current_station!=nil { ask ev.current_station { do cancel_session(ev); } }
+        do record_event(ev,"replan");
+        ask ev {
+            if session_state="waiting" { ranr_previous_wait <- waiting_time; }
+            do unregister; final_target <- nil; ranr_leg <- ranr_leg+1;
+            session_state <- "requested"; current_station <- nil; arrival_time <- -1.0; station_arrival_due <- -1.0;
+            ranr_replan_pending <- false; ranr_at_replan_node <- false;
+        }
+    }
     action ranr_abort(string reason) {
-        ranr_error <- reason; ranr_done <- true;
+        ranr_error <- reason; ranr_failed <- true; ranr_done <- true;
+        if ranr_collect_gui or ("collect_gui" in ranr_locked_settings.keys and bool(ranr_locked_settings["collect_gui"])) { ranr_collection_status <- "COLLECTION FAILED: "+reason; }
         write "RANR_ERROR: "+reason;
+        string failure_output <- "output" in ranr_locked_settings.keys ? string(ranr_locked_settings["output"]) : ranr_output;
+        string failure_run_id <- "run_id" in ranr_locked_settings.keys ? string(ranr_locked_settings["run_id"]) : ranr_run_id;
+        if folder_exists(failure_output) {
+            save ["run_id"::failure_run_id,"status"::"failed","reason"::reason,"at_min"::(time/60.0)] to:failure_output+"/failure.json" format:"json";
+        }
         do pause;
     }
     action ranr_initialize {
         float started <- machine_time;
-        ranr_master_seed <- float(seed);
-        // Controlled runtime draws are keyed; the startup stream is finished.
-        // GAMA setUsage(n) replays n draws, so restore an unused base stream.
-        seed <- ranr_master_seed; rng_usage <- 0;
+        ranr_master_seed <- mobility_seed; mobility_master_seed <- ranr_master_seed;
+        // Native RNG is seeded once at startup; mobility never restores or reseeds it.
         if ranr_run_id="gui" { ranr_run_id <- "gui_"+string(machine_time)+"_"+string(int(seed)); ranr_output <- ranr_output+"/"+ranr_run_id; }
         assert ranr_enabled;
-        assert ranr_private_frequency>=0.0 and ranr_taxi_frequency>=0.0;
         assert rush_extra_percent>=0.0 and rush_extra_percent<=30.0;
-        assert ranr_soc_threshold>0.0 and ranr_soc_threshold<=target_soc and target_soc<=100.0;
+        assert ranr_safety_soc>=0.0 and ranr_safety_soc<10.0 and ranr_energy_retry_minutes>0.0 and ranr_energy_retry_max_minutes>=ranr_energy_retry_minutes;
         assert ranr_method in ["RANR-AW","No-P2P","No-Prediction","Fixed-Weights"];
         assert ranr_samples>0 and ranr_measure>0.0 and ranr_deadline>0.0 and step>0.0;
         if ranr_case in ["low_compliance","combined"] { ranr_true_compliance <- 0.2; }
@@ -115,7 +165,7 @@ global {
         assert ranr_true_defer>=0.0 and ranr_true_decline>=0.0 and ranr_true_defer+ranr_true_decline<=1.0;
         file destination <- new_folder(ranr_output); ranr_output <- destination.path;
         ranr_stations <- (list(charging_station) sort_by each.name);
-        if ranr_station_events_file!="" { ranr_outage_schedule <- json_file(ranr_station_events_file).contents; loop outage over:ranr_outage_schedule { outage["applied"] <- false; assert int(outage["sid"])>=0 and int(outage["sid"])<11 and float(outage["factor"])>=0.0 and float(outage["factor"])<=1.0; } }
+        do ranr_load_outage_schedule;
         assert length(ranr_stations)=11;
         loop sid from: 0 to: length(ranr_stations)-1 {
             charging_station station <- ranr_stations[sid]; station.ranr_sid <- sid;
@@ -124,6 +174,7 @@ global {
             prior["source"] <- "prior"; prior["issued"] <- 0.0;
             ranr_public_priors << prior;
         }
+        save (ranr_stations collect ["sid"::each.ranr_sid,"name"::each.name,"ports"::copy(each.ranr_port_catalog)]) to:ranr_output+"/station_inventory.json" format:"json";
         assert sum(ranr_stations collect each.installed_port_count)=125;
         assert abs(sum(ranr_stations collect sum(list<float>(each.ranr_local_snapshot["powers"]))) - 7195.0)<1e-8;
         loop source over: ranr_stations {
@@ -140,6 +191,7 @@ global {
         if ranr_calibration_file!="" {
             assert file_exists(ranr_calibration_file);
             map<string,unknown> calibration <- json_file(ranr_calibration_file).contents;
+            assert string(calibration["objective_version"])=ranr_objective_version and string(calibration["objective_config_hash"])=ranr_objective_config_hash;
             assert string(calibration["backend"])="GAMA" and string(calibration["split"])="train" and string(calibration["environment_version"])=ranr_environment_version;
             ranr_release_fractions <- list<float>(calibration["release_fractions"]);
             ranr_energy_fractions <- list<float>(calibration["energy_fractions"]);
@@ -157,6 +209,7 @@ global {
                 map<string,unknown> prior <- ranr_clone_snapshot(pool[0]); prior["source"] <- "prior"; prior["issued"] <- 0.0;
                 // Historical outage samples are not proof of current infeasibility.
                 prior["powers"] <- copy(ranr_public_priors[sid]["powers"]);
+                prior["aggregate_kw"] <- ranr_public_priors[sid]["aggregate_kw"];
                 prior["operational"] <- true; prior["connectors"] <- copy(ranr_public_priors[sid]["connectors"]);
                 ranr_public_priors[sid] <- prior; ranr_stations[sid].ranr_local_rate <- ranr_prior_rate;
             }
@@ -166,28 +219,26 @@ global {
         }
         assert !empty(ranr_release_fractions) and min(ranr_release_fractions)>=0.0 and max(ranr_release_fractions)<=1.0;
         assert !empty(ranr_energy_fractions) and min(ranr_energy_fractions)>=0.0 and max(ranr_energy_fractions)<=1.0;
-        save "request_id,issued_min,origin,energy_kwh,max_kw,initial_soc,participating\n" to: ranr_output+"/demand.csv" format: "text";
+        save "request_id,issued_min,origin,energy_kwh,max_kw,initial_soc,participating,intent_id,target_soc\n" to: ranr_output+"/demand.csv" format: "text";
         save "request_id,issued_min,issuer,recommended,actual,weights,probabilities,estimates,entropy,state,costs,token,raw_features,normalized_features\n" to: ranr_output+"/recommendations.csv" format: "text";
         save "sender,receiver,sequence,issued_min,received_min,bytes,status\n" to: ranr_output+"/messages.csv" format: "text";
-        save "request_id,terminal_record,time_min,energy_kwh,waiting_min,travel_m,token,leg\n" to: ranr_output+"/events.csv" format: "text";
+        save "request_id,terminal_record,time_min,energy_kwh,waiting_min,travel_m,token,leg,station_sid,port_id,vehicle_id,soc,target_soc,intent_id,port_kw,ev_limit_kw\n" to: ranr_output+"/events.csv" format: "text";
         save "snapshot\n" to: ranr_output+"/calibration_snapshots.csv" format: "text";
         save "context\n" to: ranr_output+"/calibration_contexts.csv" format: "text";
         save "release_fraction,energy_fraction\n" to: ranr_output+"/calibration_fractions.csv" format: "text";
+        save "request_id,at,reason,required_kwh,target_soc,soc\n" to:ranr_output+"/demand_energy_updates.csv" format:"text";
         do ranr_initialize_fleet;
         map<string,unknown> run_configuration <- ["backend"::"GAMA","run_id"::ranr_run_id,"method"::ranr_method,"case"::ranr_case,
             "seed"::seed,"initial_hour"::initial_hour,"step_seconds"::step,"warmup_minutes"::ranr_warmup,"measure_minutes"::ranr_measure,
             "deadline_minutes"::ranr_deadline,"scenarios"::ranr_samples,"development"::ranr_development,"gui_preview"::ranr_gui_preview_active,"environment_version"::ranr_environment_version,"calibrating"::ranr_calibrating,
             "initial_private_cars"::length(car),"initial_private_evs"::length(private_ev),"initial_electric_taxis"::length(taxi_ev),
             "calibration_source"::ranr_calibration_source,"parameters"::ranr_parameters,
-            "private_frequency"::ranr_private_frequency,"taxi_frequency"::ranr_taxi_frequency,"soc_threshold"::ranr_soc_threshold,"target_soc"::target_soc,
-            "base_opportunities_per_minute"::ranr_base_rate,"rush_enabled"::have_rush,"rush_extra_percent"::rush_extra_percent,
-            "consumption_kwh_km"::consumption_kwh_km,"charge_efficiency"::charge_efficiency,"battery_capacity_kwh"::battery_capacity_kwh,"ev_speed_kmh"::ranr_ev_speed,"car_speed_kmh"::ranr_car_speed,"compliance"::ranr_true_compliance,"defer_probability"::ranr_true_defer,"decline_probability"::ranr_true_decline,"abandon_after_minutes"::ranr_abandon_after,"burst_size"::ranr_burst_size,"objective_version"::ranr_objective_version,"observation_version"::ranr_observation_version,
-            "temperature"::ranr_temperature,"p2p_interval"::ranr_broadcast_period,"min_send_seconds"::(60.0*ranr_min_send),"stabilization"::ranr_stabilization,"behavior_case"::ranr_behavior_case,"failure_beta"::ranr_failure_beta,"energy_beta"::ranr_energy_beta,
+            "demand_mechanism"::"soc_activity_intents","rush_enabled"::have_rush,"rush_extra_percent"::rush_extra_percent,
+            "consumption_kwh_km"::consumption_kwh_km,"charge_efficiency"::charge_efficiency,"battery_capacity_kwh"::battery_capacity_kwh,"ev_speed_kmh"::ranr_ev_speed,"car_speed_kmh"::ranr_car_speed,"compliance"::ranr_true_compliance,"defer_probability"::ranr_true_defer,"decline_probability"::ranr_true_decline,"abandon_after_minutes"::ranr_abandon_after,"objective_version"::ranr_objective_version,"observation_version"::ranr_observation_version,
+            "temperature"::ranr_temperature,"p2p_interval"::ranr_broadcast_period,"min_send_seconds"::(60.0*ranr_min_send),"stabilization"::ranr_stabilization,"behavior_case"::ranr_behavior_case,"objective_config_hash"::ranr_objective_config_hash,
             "delay_minutes"::ranr_delay,"packet_loss"::ranr_loss,"duplicate_probability"::ranr_duplicate_probability,"partition_begin"::ranr_partition_begin,"partition_end"::ranr_partition_end,"station_events"::ranr_station_events_file];
         save run_configuration to: ranr_output+"/configuration.json" format: "json";
-        ranr_locked_method <- ranr_method;ranr_locked_samples <- ranr_samples;ranr_locked_step <- step;ranr_locked_deadline <- ranr_deadline; ranr_locked_ev_speed <- ele_car_speed; ranr_locked_car_speed <- car_speed;
-        ranr_locked_environment <- [float(cars),float(privates),float(taxis),ranr_private_frequency,ranr_taxi_frequency,ranr_soc_threshold,target_soc,rush_extra_percent,float(have_rush),initial_hour,consumption_kwh_km,charge_efficiency];
-        ranr_locked_design <- to_json([ranr_temperature,ranr_broadcast_period,ranr_min_send,ranr_delay,ranr_loss,ranr_duplicate_probability,ranr_partition_begin,ranr_partition_end,ranr_behavior_case,ranr_stabilization,ranr_failure_beta,ranr_energy_beta,ranr_true_decline,ranr_abandon_after,ranr_warmup,ranr_measure,ranr_horizon,ranr_ttl,ranr_station_events_file]);
+        ranr_locked_settings <- ranr_live_settings();
         ranr_initialized <- true; ranr_init_ms <- machine_time-started;
     }
     action ranr_broadcast(charging_station sender,float at) {
@@ -242,24 +293,25 @@ global {
     }
     map<string,unknown> ranr_request_context(elecar ev) {
         float started <- machine_time;
-        list<float> travel <- []; list<float> distances <- [];
-        intersection origin <- intersection closest_to ev;
+        list<float> travel <- []; list<float> distances <- []; list<float> arrival_energy <- [];
+        intersection origin <- ranr_vehicle_origin(ev);
         float connector <- ev.location distance_to origin.location;
         if ev.current_road!=nil and ev.current_target!=nil { origin <- intersection(ev.current_target); connector <- ev.distance_to_current_target; }
         int origin_key <- origin.index;
         list<path> paths <- [];
-        if origin_key in ranr_route_cache.keys { paths <- ranr_route_cache[origin_key]; ranr_route_hits <- ranr_route_hits+1; }
+        if (ranr_route_cache contains_key origin_key) { paths <- ranr_route_cache[origin_key]; ranr_route_hits <- ranr_route_hits+1; }
         else { loop station over:ranr_stations { paths << path_between(road_network,origin,station.closest_intersection); } ranr_route_cache[origin_key] <- paths; }
         loop sid from:0 to:length(paths)-1 {
             path route <- paths[sid]; float distance <- route=nil ? -1.0 : connector+sum(route.edges collect (road(each).shape.perimeter));
             bool feasible <- !(sid in ev.ranr_unavailable_sids) and distance>=0.0 and distance*consumption_kwh_km/1000.0+ranr_safety_soc*battery_capacity_kwh/100.0<=ev.battery_level*battery_capacity_kwh/100.0;
             travel << (feasible ? distance/(ranr_ev_speed/3.6)/60.0 : -1.0); distances << distance;
+            arrival_energy << max(0.0,(ev.soc_session_target-ev.battery_level)*battery_capacity_kwh/100.0+max(0.0,distance)*consumption_kwh_km/1000.0);
         }
         list<float> valid <- travel where (each>=0.0);
         int issuer <- ev.ranr_issuer>=0 ? ev.ranr_issuer : (empty(valid) ? 0 : travel index_of min(valid));
         ev.ranr_issuer <- issuer; ev.ranr_token <- string(issuer)+":"+string(ev.ranr_demand_key)+":"+string(ev.ranr_leg);
         ranr_route_ms <- ranr_route_ms+machine_time-started;
-        return ranr_record(["key"::(ev.ranr_demand_key*3+ev.ranr_leg),"token"::ev.ranr_token,"at"::(time/60.0),"issuer"::issuer,"origin"::origin_key,"energy"::max(0.0,ev.requested_energy-ev.delivered_energy),"max_kw"::ev.ranr_max_kw,"travel"::travel,"distances"::distances,"connector"::ev.ranr_connector,"context"::ev.ranr_vehicle_kind,"remaining_deadline"::max(0.0,ev.request_time+ranr_deadline-time/60.0)]);
+        return ranr_record(["key"::(ev.ranr_demand_key*3+ev.ranr_leg),"token"::ev.ranr_token,"at"::(time/60.0),"issuer"::issuer,"origin"::origin_key,"energy"::max(0.0,ev.requested_energy-ev.delivered_energy),"max_kw"::ev.ranr_max_kw,"travel"::travel,"distances"::distances,"energy_by_station"::arrival_energy,"connector"::ev.ranr_connector,"context"::ev.ranr_vehicle_kind,"remaining_observation"::max(0.0,ranr_warmup+ranr_measure+ranr_deadline-time/60.0),"deadline"::ev.ranr_deadline_at]);
     }
     float ranr_driver_compliance(elecar ev,map<string,unknown> request) {
         if ranr_case in ["low_compliance","combined"] { return 0.2; }
@@ -277,9 +329,9 @@ global {
         float at <- time/60.0;
         map<string,unknown> request <- ranr_request_context(ev);
         int issuer <- int(request["issuer"]); charging_station station <- ranr_stations[issuer];
-        if !(ev.request_id in ranr_demands.keys) {
-            save ev.request_id+","+ev.request_time+","+request["origin"]+","+ev.requested_energy+","+ev.ranr_max_kw+","+ev.battery_level+","+ev.ranr_participating+"\n" to:ranr_output+"/demand.csv" format:"text" rewrite:false;
-            ranr_demands[ev.request_id] <- ["key"::ev.ranr_demand_key,"at"::ev.request_time,"energy"::ev.requested_energy,"vehicle_id"::ev.mobility_id,"kind"::ev.ranr_vehicle_kind,"ev"::ev,"measured"::ev.ranr_measured];
+        if !((ranr_demands contains_key ev.request_id)) {
+            save ev.request_id+","+ev.request_time+","+request["origin"]+","+ev.requested_energy+","+ev.ranr_max_kw+","+ev.battery_level+","+ev.ranr_participating+","+ev.charging_intent_id+","+ev.soc_session_target+"\n" to:ranr_output+"/demand.csv" format:"text" rewrite:false;
+            ranr_demands[ev.request_id] <- ranr_record(["key"::ev.ranr_demand_key,"at"::ev.request_time,"energy"::ev.requested_energy,"vehicle_id"::ev.mobility_id,"kind"::ev.ranr_vehicle_kind,"ev"::ev,"measured"::ev.ranr_measured,"intent_id"::ev.charging_intent_id]);
         }
         map<string,unknown> result <- [];
         map<string,unknown> observation <- [];
@@ -320,8 +372,10 @@ global {
                 if !empty(feasible) { chosen <- feasible[ranr_categorical(ranr_softmax(preference_logits),ranr_uniform(214,ev.ranr_demand_key,0))]; }
             }
         }
-        ranr_demands[ev.request_id]["route_energy_feasible"] <- sum(ranr_base(travel))>0.0;
-        ranr_demands[ev.request_id]["replans"] <- ev.ranr_leg;
+        map<string,unknown> updated_demand <- ranr_demands[ev.request_id];
+        updated_demand["route_energy_feasible"] <- sum(ranr_base(travel))>0.0;
+        updated_demand["replans"] <- ev.ranr_leg;
+        ranr_demands[ev.request_id] <- updated_demand;
         ranr_decisions[ev.request_id] <- ["recommended"::recommended,"chosen"::chosen,"participating"::participate,"issuer"::issuer,"estimates"::result["estimates"],"known_waiting_at_decision"::ev.ranr_previous_wait];
         if chosen<0 { string terminal <- sum(ranr_base(travel))<=0.0 ? "no_feasible_station" : (outside_draw<ranr_true_defer ? "voluntary_deferred" : "declined");
             ask station { do ranr_resolve(ev.ranr_token,terminal,at); } ask ev { do cancel_request(terminal); } do ranr_finalize(ev,terminal,at); }
@@ -342,17 +396,24 @@ global {
         if ranr_trace {
             ranr_recommendation_buffer <- ranr_recommendation_buffer+ev.request_id+","+at+","+issuer+","+recommended+","+chosen+",\""+to_json(result["weights"])+"\",\""+to_json(probability)+"\",\""+replace(to_json(result["estimates"]),'"','""')+"\","+entropy+",\""+to_json("state" in result.keys ? result["state"] : [])+"\",\""+to_json("costs" in result.keys ? result["costs"] : [])+"\","+ev.ranr_token+",\""+to_json("raw_features" in result.keys ? result["raw_features"] : [])+"\",\""+to_json("normalized_features" in result.keys ? result["normalized_features"] : [])+"\"\n";
         }
-        if ranr_calibrating and ev.ranr_measured {
-            map<string,unknown> context <- ["request_id"::ev.request_id,"token"::ev.ranr_token,"leg"::ev.ranr_leg,"vehicle_id"::ev.mobility_id,"kind"::ev.ranr_vehicle_kind,"chosen"::chosen,"issuer"::issuer,"travel"::travel,"energy"::request["energy"],"max_kw"::request["max_kw"],"participating"::participate,"recommended"::recommended,"context"::ev.ranr_vehicle_kind,"at"::at];
+        if ranr_calibrating and at>=ranr_warmup and at<ranr_warmup+ranr_measure {
+            map<string,unknown> context <- ["request_id"::ev.request_id,"token"::ev.ranr_token,"leg"::ev.ranr_leg,"vehicle_id"::ev.mobility_id,"intent_id"::ev.charging_intent_id,"kind"::ev.ranr_vehicle_kind,"chosen"::chosen,"issuer"::issuer,"travel"::travel,"energy"::(chosen>=0 ? ev.requested_energy : request["energy"]),"energy_by_station"::request["energy_by_station"],"max_kw"::request["max_kw"],"participating"::participate,"recommended"::recommended,"context"::ev.ranr_vehicle_kind,"at"::at];
             ranr_context_buffer <- ranr_context_buffer+'"'+replace(to_json(context),'"','""')+'"\n';
         }
 
     }
+    action ranr_session_energy_changed(elecar ev,string reason) {
+        if (ranr_demands contains_key ev.request_id) {
+            map<string,unknown> updated_demand <- ranr_demands[ev.request_id];
+            updated_demand["energy"] <- ev.requested_energy;
+            ranr_demands[ev.request_id] <- updated_demand;
+        }
+        save ev.request_id+","+time/60.0+","+reason+","+ev.requested_energy+","+ev.soc_session_target+","+ev.battery_level+"\n" to:ranr_output+"/demand_energy_updates.csv" format:"text" rewrite:false;
+    }
     action ranr_finalize(elecar ev,string status,float at) {
-        if ev.request_id in ranr_outcomes.keys { return nil; }
+        if (ranr_outcomes contains_key ev.request_id) { return nil; }
         map<string,unknown> demand <- ranr_demands[ev.request_id];
         if demand=nil { return nil; }
-        at <- min(at,ev.request_time+ranr_deadline);
         float waiting <- ev.waiting_time;
         if ev.session_state="waiting" and ev.arrival_time>=0.0 { waiting <- max(waiting,ev.ranr_previous_wait+at-ev.arrival_time); }
         ranr_outcomes[ev.request_id] <- ranr_outcome(demand,ev.request_id,status,at,ev.delivered_energy,ev.ranr_travel_min,waiting,ev.ranr_charge_elapsed);
@@ -368,27 +429,33 @@ global {
             string rows <- "";
             loop j from: ranr_event_cursor to: length(session_events)-1 {
                 map<string,unknown> terminal_record <- session_events[j];
-                rows <- rows+terminal_record["request_id"]+","+terminal_record["event"]+","+terminal_record["time_min"]+","+terminal_record["energy_kwh"]+","+terminal_record["waiting_min"]+","+terminal_record["travel_m"]+","+terminal_record["token"]+","+terminal_record["leg"]+"\n";
+                rows <- rows+terminal_record["request_id"]+","+terminal_record["event"]+","+terminal_record["time_min"]+","+terminal_record["energy_kwh"]+","+terminal_record["waiting_min"]+","+terminal_record["travel_m"]+","+terminal_record["token"]+","+terminal_record["leg"]+","+terminal_record["station_sid"]+","+terminal_record["port_id"]+","+terminal_record["vehicle_id"]+","+terminal_record["soc"]+","+terminal_record["target_soc"]+","+terminal_record["intent_id"]+","+terminal_record["port_kw"]+","+terminal_record["ev_limit_kw"]+"\n";
             }
             save rows to: ranr_output+"/events.csv" format:"text" rewrite:false; ranr_event_cursor <- length(session_events);
         }
     }
     action ranr_finish {
+        do ranr_finish_intents(time/60.0);
+        do ranr_before_finish;
         do ranr_flush;
         list<map<string,unknown>> measured <- list(ranr_outcomes.values) where bool(each["measured"]);
 
         list<float> waits <- measured collect float(each["waiting_min"]);
         int installed <- int(sum(ranr_stations collect each.installed_port_count));
-        list<map<string,unknown>> measured_opportunities <- ranr_opportunity_ledger where (bool(each["measured"]));
-        map<string,unknown> components <- ranr_score(["results"::measured,"opportunities"::measured_opportunities,"peak"::ranr_peak_queue,"ports"::installed]);
-        float objective <- float(components["objective"]);
+        list<map<string,unknown>> measured_intents <- list(ranr_intents.values) where (float(each["at"])>=ranr_warmup and float(each["at"])<ranr_warmup+ranr_measure);
+        list<map<string,unknown>> intent_results <- list(ranr_intent_outcomes.values) where bool(each["measured"]);
+        list<map<string,unknown>> mobility_cohort <- list(ranr_activity_outcomes.values) where (float(each["at"])>=ranr_warmup and float(each["at"])<ranr_warmup+ranr_measure);
+        int mobility_unserved <- length(mobility_cohort where (each["status"]!="completed"));
+        map<string,unknown> components <- ranr_score(["results"::list(ranr_intent_outcomes.values),"intents"::list(ranr_intents.values),
+            "planned_ev_days"::ranr_planned_ev_days,"observation_end"::(time/60.0),"queue_pressure"::ranr_queue_pressure,
+            "stranded_count"::length(ranr_stranded_ids),"mobility_unserved_count"::mobility_unserved]);
         list<float> station_utilization <- ranr_stations collect (each.ranr_station_busy_minutes/(each.installed_port_count*ranr_measure));
         list<int> station_demand <- [];
         list<float> prediction_errors <- []; int matched <- 0; int recommended_count <- 0;
         loop sid from: 0 to: length(ranr_stations)-1 { station_demand << 0; }
         loop outcome over: measured {
             string rid <- string(outcome["request_id"]);
-            if !(rid in ranr_decisions.keys) { continue; }
+            if !((ranr_decisions contains_key rid)) { continue; }
             map<string,unknown> decision <- ranr_decisions[rid]; int chosen <- int(decision["chosen"]);
             if chosen>=0 { station_demand[chosen] <- station_demand[chosen]+1; }
             if int(decision["recommended"])>=0 {
@@ -400,9 +467,9 @@ global {
                 prediction_errors << float(estimates[chosen]["mean"])+float(decision["known_waiting_at_decision"])-float(outcome["waiting_min"]);
             }
         }
-        float requested <- sum(measured collect float(each["requested_kwh"]));
-        float delivered <- sum(measured collect float(each["delivered_kwh"]));
-        map<string,unknown> metrics <- ["backend"::"GAMA","run_id"::ranr_run_id,"method"::ranr_method,"objective"::objective,"demand_count"::length(measured),
+        float requested <- sum(intent_results collect float(each["requested_kwh"]));
+        float delivered <- sum(intent_results collect float(each["delivered_kwh"]));
+        map<string,unknown> metrics <- ["backend"::"GAMA","run_id"::ranr_run_id,"method"::ranr_method,"operational_objective"::components["operational_objective"],"demand_count"::length(measured),
             "all_demand_count"::length(ranr_demands),"all_outcome_count"::length(ranr_outcomes),"served_count"::length(measured where (each["status"]="completed")),
             "mean_travel_min"::(empty(measured) ? 0.0 : mean(measured collect float(each["travel_min"]))),"mean_wait_min"::(empty(waits) ? 0.0 : mean(waits)),"p95_wait_min"::(empty(waits) ? 0.0 : ranr_quantile(waits,0.95)),
             "mean_total_min"::(empty(measured) ? 0.0 : mean(measured collect (float(each["service_time_min"])))),"peak_queue"::ranr_peak_queue,
@@ -415,12 +482,29 @@ global {
             "prediction_ms"::ranr_prediction_ms,"externality_ms"::ranr_externality_ms,"policy_ms"::ranr_policy_ms,"information_ms"::ranr_information_ms];
         metrics <- ranr_record(metrics);
         metrics["objective_components"] <- components;
+        metrics["objective_config_hash"] <- ranr_objective_config_hash;
+        metrics["fitness_vector"] <- components["fitness_vector"];
+        metrics["failure_reason"] <- components["failure_reason"];
+        metrics["planned_ev_days"] <- ranr_planned_ev_days;
+        metrics["mobility_planned_count"] <- length(mobility_cohort);
+        metrics["mobility_completed_count"] <- length(mobility_cohort)-mobility_unserved;
+        metrics["mobility_unserved_count"] <- mobility_unserved;
+        metrics["not_on_time_count"] <- components["not_on_time_count"];
+        metrics["unmet_kwh"] <- components["unmet_kwh"];
+        metrics["queue_pressure"] <- ranr_queue_pressure;
+        metrics["station_zero_capacity_events"] <- ranr_stations collect each.ranr_zero_capacity;
+        metrics["maximum_physical_queue_length"] <- ranr_peak_queue;
+        metrics["mean_completed_time_min"] <- components["mean_completion_min"];
+        metrics["mean_wait_min"] <- components["mean_wait_min"];
+        metrics["p95_wait_min"] <- components["p95_wait_min"];
+        metrics["waiting_sample_count"] <- components["waiting_sample_count"];
+        metrics["conditional_success_rate"] <- components["conditional_success_rate"];
+        metrics["conditional_on_time_rate"] <- components["conditional_on_time_rate"];
         metrics["objective_version"] <- ranr_objective_version;
         metrics["fitness_valid"] <- components["fitness_valid"];
-        metrics["measurement_opportunity_count"] <- length(measured_opportunities);
+        metrics["measurement_intent_count"] <- length(measured_intents);
         list<map<string,unknown>> completed <- measured where (each["status"]="completed");
-        metrics["mean_completed_time_min"] <- empty(completed) ? 0.0 : mean(completed collect float(each["service_time_min"]));
-        metrics["mean_time_per_opportunity_min"] <- sum(measured collect float(each["service_time_min"]))/max(1,length(measured_opportunities));
+        metrics["mean_time_per_intent_min"] <- sum(intent_results collect float(each["service_time_min"]))/max(1,length(measured_intents));
         metrics["mean_charging_min"] <- empty(measured) ? 0.0 : mean(measured collect float(each["charging_min"]));
         metrics["recommendation_latency_mean_ms"] <- empty(ranr_policy_latencies) ? 0.0 : mean(ranr_policy_latencies);
         metrics["recommendation_latency_p95_ms"] <- empty(ranr_policy_latencies) ? 0.0 : ranr_quantile(ranr_policy_latencies,0.95);
@@ -429,13 +513,24 @@ global {
         metrics["duplicate_packets"] <- sum(ranr_stations collect each.ranr_duplicate_packets);
         list<float> ages <- []; loop station over:ranr_stations { ages <- ages+station.ranr_received_ages; }
         metrics["received_information_age_min"] <- empty(ages) ? 0.0 : mean(ages);
-        metrics["station_queue_pressure"] <- ranr_stations collect (float(each.peak_physical_queue)/max(1,each.installed_port_count));
-        metrics["opportunity_count"] <- ranr_opportunity_count;
-        metrics["activated_count"] <- ranr_activated_count;
-        metrics["burst_shortfall"] <- ranr_burst_shortfall;
+        metrics["station_queue_pressure"] <- ranr_stations collect each.ranr_peak_pressure;
+        metrics["intent_count"] <- length(ranr_intents);
+        metrics["intent_outcome_count"] <- length(ranr_intent_outcomes);
+        metrics["recommendation_attempt_count"] <- ranr_total_recommendations;
+        metrics["request_attempt_count"] <- length(ranr_attempts);
+        metrics["retry_attempt_count"] <- length(ranr_attempts where (int(each["attempt"])>1));
+        metrics["completed_intent_count"] <- length(intent_results where (each["status"]="completed"));
+        metrics["unresolved_intent_count"] <- length(intent_results where (each["status"]="unresolved"));
+        metrics["failed_intent_count"] <- length(intent_results where (each["status"]="failed"));
+        metrics["intent_requested_kwh"] <- sum(intent_results collect float(each["requested_kwh"]));
+        metrics["intent_delivered_kwh"] <- sum(intent_results collect float(each["delivered_kwh"]));
         metrics["inbound_created"] <- ranr_inbound_created; metrics["inbound_exited"] <- ranr_inbound_exited;
         metrics["persistent_vehicle_count"] <- length(ranr_city_vehicles where (!each.ranr_inbound));
         metrics["stranded_vehicle_count"] <- length(ranr_city_vehicles where each.ranr_stranded);
+        metrics["energy_held_vehicle_count"] <- length(ranr_city_vehicles where each.ranr_energy_hold);
+        metrics["low_soc_intent_count"] <- length(ranr_intents.values where (each["cause"]="low_soc"));
+        metrics["trip_energy_intent_count"] <- length(ranr_intents.values where (each["cause"]="trip_energy"));
+        metrics["shift_energy_intent_count"] <- length(ranr_intents.values where (each["cause"]="shift_energy"));
         metrics["empty_demand_run"] <- empty(measured);
         metrics["unserved_count"] <- length(measured where (each["status"]!="completed"));
         metrics["unserved_kwh"] <- max(0.0,requested-delivered);
@@ -452,30 +547,11 @@ global {
         metrics["station_demand_count"] <- station_demand;
         metrics["load_balance_cv"] <- mean(station_utilization)>0.0 ? sqrt(mean(station_utilization collect ((each-mean(station_utilization))^2)))/mean(station_utilization) : 0.0;
         loop terminal_status over: ["completed","no_feasible_station","voluntary_deferred","declined","abandoned","deadline_missed","stranded"] { metrics[terminal_status+"_count"] <- length(measured where (each["status"]=terminal_status)); }
-        list<map<string,unknown>> bursts <- [];
-        list<float> burst_times <- remove_duplicates((measured_opportunities where (each["cause"]="burst")) collect float(each["at"]));
-        loop burst_at over:burst_times {
-            list<map<string,unknown>> opportunities <- measured_opportunities where (each["cause"]="burst" and float(each["at"])=burst_at);
-            list<float> issued <- zero_vector(length(ranr_stations)); list<float> arrivals <- zero_vector(length(ranr_stations)); int unsuccessful <- 0;
-            loop opportunity over:opportunities {
-                string rid <- "ranr_"+opportunity["key"];
-                if rid in ranr_decisions.keys {
-                    map<string,unknown> decision <- ranr_decisions[rid]; int recommended <- int(decision["recommended"]); int chosen <- int(decision["chosen"]);
-                    if recommended>=0 { issued[recommended] <- issued[recommended]+1.0; }
-                    if chosen>=0 and !empty(session_events where (each["request_id"]=rid and each["event"]="arrival")) { arrivals[chosen] <- arrivals[chosen]+1.0; }
-                    if rid in ranr_outcomes.keys and ranr_outcomes[rid]["status"]!="completed" { unsuccessful <- unsuccessful+1; }
-                }
-            }
-            list<map<string,unknown>> pressure <- ranr_queue_history where (float(each["at"])>=burst_at and float(each["at"])<=burst_at+30.0);
-            bursts << ["at"::burst_at,"opportunities"::length(opportunities),"activated"::length(opportunities where (each["status"]="activated")),"unsuccessful_requests"::unsuccessful,
-                "issued_by_station"::issued,"arrivals_by_station"::arrivals,"issued_concentration"::(sum(issued)>0.0 ? sum(issued collect ((each/sum(issued))^2)) : 0.0),
-                "arrival_concentration"::(sum(arrivals)>0.0 ? sum(arrivals collect ((each/sum(arrivals))^2)) : 0.0),"post_burst_peak_queue_30min"::(empty(pressure) ? 0 : max(pressure collect int(each["peak"])) )];
-        }
-        metrics["burst_diagnostics"] <- bursts;
+        metrics["deadline_missed_count"] <- length(intent_results where bool(each["deadline_missed"]));
         list<float> uncensored_errors <- []; list<float> tail_covered <- [];
         loop event_record over:session_events where (each["event"]="service_started") {
             string rid <- string(event_record["request_id"]);
-            if !(rid in ranr_decisions.keys) or !(rid in ranr_demands.keys) or !bool(ranr_demands[rid]["measured"]) { continue; }
+            if !((ranr_decisions contains_key rid)) or !((ranr_demands contains_key rid)) or !bool(ranr_demands[rid]["measured"]) { continue; }
             map<string,unknown> decision <- ranr_decisions[rid]; int chosen <- int(decision["chosen"]); list<map<string,unknown>> estimates <- decision["estimates"];
             if chosen<0 or empty(estimates) { continue; }
             uncensored_errors << float(estimates[chosen]["mean"])+float(decision["known_waiting_at_decision"])-float(event_record["waiting_min"]);
@@ -484,15 +560,19 @@ global {
         metrics["prediction_service_start_count"] <- length(uncensored_errors);
         metrics["prediction_service_start_mae_min"] <- empty(uncensored_errors) ? 0.0 : mean(uncensored_errors collect abs(each));
         metrics["prediction_p95_coverage"] <- empty(tail_covered) ? 0.0 : mean(tail_covered);
+        loop kind_name over:["private","taxi"] {
+            list<map<string,unknown>> group <- intent_results where (each["kind"]=kind_name);
+            metrics[kind_name+"_intent_count"] <- length(group);
+            metrics[kind_name+"_on_time_count"] <- length(group where bool(each["on_time"]));
+            metrics[kind_name+"_completed_count"] <- length(group where (each["status"]="completed"));
+            metrics[kind_name+"_conditional_success_rate"] <- empty(group) ? nil : float(length(group where (each["status"]="completed")))/length(group);
+        }
+        metrics["intents_per_planned_ev_day"] <- length(measured_intents)/max(1e-100,ranr_planned_ev_days);
+        metrics["stranded_vehicle_count"] <- length(ranr_stranded_ids);
+        save list(ranr_stranded_ids.keys) to:ranr_output+"/stranded_ev_ids.json" format:"json";
         save ranr_queue_history to:ranr_output+"/queue_history.json" format:"json";
         assert length(ranr_outcomes)=length(ranr_demands);
-        list<map<string,unknown>> ledger <- [];
-        loop opportunity over:ranr_opportunity_ledger {
-            map<string,unknown> entry <- ranr_record(opportunity); string rid <- "ranr_"+opportunity["key"];
-            if rid in ranr_outcomes.keys { entry["outcome"] <- ranr_outcomes[rid]; }
-            ledger << entry;
-        }
-        save ledger to:ranr_output+"/opportunity_outcomes.json" format:"json";
+        assert length(ranr_intent_outcomes)=length(ranr_intents);
         save list(ranr_outcomes.values) to: ranr_output+"/outcomes.json" format:"json";
         save metrics to: ranr_output+"/metrics.json" format:"json";
         save ["run_id"::ranr_run_id,"status"::"complete","backend"::"GAMA","finished_min"::(time/60.0),"outcome_count"::length(ranr_outcomes)] to: ranr_output+"/completion.json" format:"json";
@@ -501,14 +581,17 @@ global {
         write "RANR_COMPLETE "+ranr_run_id;
         do pause;
     }
-    reflex ranr_configuration_guard when: ranr_initialized and !ranr_done and !ranr_enabled {
-        do ranr_abort("Enabling/disabling RANR requires restarting the experiment");
+    reflex ranr_configuration_guard when: ranr_initialized and !ranr_done {
+        map<string,unknown> current <- ranr_live_settings();
+        loop setting over:ranr_locked_settings.keys {
+            if current[setting]!=ranr_locked_settings[setting] {
+                do ranr_abort("Configuration changed: "+setting+"; restart required");
+                return nil;
+            }
+        }
     }
     reflex ranr_tick when: ranr_enabled and !ranr_done {
         if !ranr_initialized { do ranr_initialize; if !ranr_initialized { return nil; } }
-        if ranr_method!=ranr_locked_method or ranr_samples!=ranr_locked_samples or step!=ranr_locked_step or ranr_deadline!=ranr_locked_deadline or ele_car_speed!=ranr_locked_ev_speed or car_speed!=ranr_locked_car_speed or ranr_ev_speed!=ranr_locked_ev_speed or ranr_car_speed!=ranr_locked_car_speed { do ranr_abort("Method, samples, step, speeds and deadline require restarting the experiment"); return nil; }
-        if ranr_locked_environment!=[float(cars),float(privates),float(taxis),ranr_private_frequency,ranr_taxi_frequency,ranr_soc_threshold,target_soc,rush_extra_percent,float(have_rush),initial_hour,consumption_kwh_km,charge_efficiency] { do ranr_abort("Fleet and physical configuration require restarting the experiment"); return nil; }
-        if ranr_locked_design!=to_json([ranr_temperature,ranr_broadcast_period,ranr_min_send,ranr_delay,ranr_loss,ranr_duplicate_probability,ranr_partition_begin,ranr_partition_end,ranr_behavior_case,ranr_stabilization,ranr_failure_beta,ranr_energy_beta,ranr_true_decline,ranr_abandon_after,ranr_warmup,ranr_measure,ranr_horizon,ranr_ttl,ranr_station_events_file]) { do ranr_abort("Research configuration changed; restart required"); return nil; }
         float at <- time/60.0; ranr_tick_epoch <- ranr_tick_epoch+1;
         do ranr_apply_outages(at);
         float interval <- max(0.0,min(at,ranr_warmup+ranr_measure)-max(ranr_last_tick,ranr_warmup));
@@ -517,24 +600,24 @@ global {
         loop service_station over:ranr_stations { ask service_station { do ranr_advance_service(at); } }
         loop terminal_record over: ranr_terminal_events {
             string rid <- string(terminal_record["request_id"]);
-            if !(rid in ranr_outcomes.keys) and rid in ranr_demands.keys {
+            if !((ranr_outcomes contains_key rid)) and (ranr_demands contains_key rid) {
                 map<string,unknown> demand <- ranr_demands[rid];
                 ranr_outcomes[rid] <- ranr_outcome(demand,rid,string(terminal_record["status"]),float(terminal_record["at"]),float(terminal_record["energy"]),float(terminal_record["travel"]),float(terminal_record["waiting"]),float(terminal_record["charging"]));
             }
         }
         ranr_terminal_events <- [];
         loop ev over: copy(ev_population) {
-            if !(ev.request_id in ranr_demands.keys) { continue; }
-            if ev.request_id in ranr_outcomes.keys { continue; }
+            if !((ranr_demands contains_key ev.request_id)) { continue; }
+            if (ranr_outcomes contains_key ev.request_id) { continue; }
             if ev.session_state="completed" { do ranr_finalize(ev,"completed",ev.service_finish); }
             else if ev.session_state="stranded" { do ranr_finalize(ev,"stranded",at); }
-            else if at>=ev.request_time+ranr_deadline {
-                if ev.session_state="waiting" { ev.waiting_time <- ev.ranr_previous_wait+max(0.0,ev.request_time+ranr_deadline-ev.arrival_time); }
-                ask ev { do cancel_request("deadline_missed"); } do ranr_finalize(ev,"deadline_missed",at);
-            }
+
         }
         loop service_station over:ranr_stations { ask service_station { do process_queue; } }
-        loop arriving_ev over:(ev_population where (each.session_state="en_route" and each.station_arrival_due>=0.0 and each.station_arrival_due<=at+1e-10)) sort_by each.ranr_demand_key { ask arriving_ev { do start_charging; } }
+        // A replacement route can end at its source node without driving another
+        // metre. Reconcile that physical arrival even when no movement callback
+        // supplied a due time; enqueue_arrival still verifies station and position.
+        loop arriving_ev over:(ev_population where (each.session_state="en_route" and each.current_station!=nil and each.final_target=nil and each.location distance_to each.current_station.closest_intersection.location<2.0 and each.station_arrival_due<=at+1e-10)) sort_by each.ranr_demand_key { ask arriving_ev { do start_charging; } }
         do ranr_deliver(at);
         do ranr_replan_events(at);
         do ranr_fleet_tick(at);
@@ -550,9 +633,13 @@ global {
                 ranr_snapshot_buffer <- ranr_snapshot_buffer+'"'+replace(to_json(station.ranr_local_snapshot),'"','""')+'"\n';
             }
         }
-        if at>=ranr_warmup and at<ranr_warmup+ranr_measure { ranr_peak_queue <- max(ranr_peak_queue,max(ranr_stations collect length(each.waiting_queue))); }
+        if at>=ranr_warmup {
+            ranr_peak_queue <- max(ranr_peak_queue,max(ranr_stations collect length(each.waiting_queue)));
+            ask ranr_stations { do ranr_measure_pressure; }
+            ranr_queue_pressure <- max(ranr_queue_pressure,max(ranr_stations collect each.ranr_peak_pressure));
+        }
         if at>=ranr_warmup and at>=ranr_next_queue_log {
-            ranr_queue_history << ["at"::at,"queues"::(ranr_stations collect length(each.waiting_queue)),"peak"::max(ranr_stations collect length(each.waiting_queue))]; ranr_next_queue_log <- at+1.0;
+            ranr_queue_history << ["at"::at,"queues"::(ranr_stations collect length(each.waiting_queue)),"peak"::max(ranr_stations collect length(each.waiting_queue)),"pressure"::(ranr_stations collect each.ranr_pressure),"zero_capacity"::(ranr_stations collect each.ranr_zero_capacity)]; ranr_next_queue_log <- at+1.0;
         }
         if at>=ranr_next_flush { do ranr_flush; ranr_next_flush <- at+5.0; }
         if at>=ranr_warmup+ranr_measure+ranr_deadline { do ranr_finish; }

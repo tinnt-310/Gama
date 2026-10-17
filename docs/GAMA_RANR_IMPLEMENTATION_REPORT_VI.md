@@ -1,5 +1,7 @@
 # Báo cáo nâng cấp RANR-AW tại chỗ
 
+**Báo cáo lịch sử của môi trường trước refactor SOC/activity.** Nguồn, hành vi sạc và dữ liệu hiện hành được mô tả tại [thiết kế SOC/activity](GAMA_ENERGY_CHARGING_VI.md) và [trạng thái nghiệm thu mới](GAMA_RANR_STATUS_VI.md). Các mặc định opportunity/target/step trong báo cáo dưới đây không còn là cấu hình hoạt động.
+
 Ngày 15/10/2026. Git checkpoint trước thay đổi: `5800181`. Môi trường `persistent-controlled-distributed-3`. Trạng thái: triển khai và kiểm tra nhỏ hoàn tất; nghiệm thu thực nghiệm nghiên cứu còn chờ.
 
 ## Audit và bảo toàn

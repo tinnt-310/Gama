@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from ..paths import ROOT, GAMA_OUTPUTS, digest, write_json
-from .contracts import TERMINAL, OBJECTIVE_VERSION, OBSERVATION_VERSION, validate_ledger, finite_tree, rescore_components, validate_configuration
+from .contracts import TERMINAL, OBJECTIVE_VERSION, OBSERVATION_VERSION, validate_charging_files, validate_physical_records, finite_tree, rescore_components, OBJECTIVE_CONFIG_HASH, validate_objective_identity, validate_fitness, validate_configuration, validate_behavior_config
 
 ENVIRONMENT = json.loads((ROOT / "configs/gama/environment.json").read_text())
 ENVIRONMENT_VERSION = ENVIRONMENT["environment_version"]
@@ -32,15 +32,14 @@ class RunConfig:
     case: str = "normal"
     seed: int = 91001
     warmup_minutes: float = 360
-    measure_minutes: float = 360
+    measure_minutes: float = 3600
     deadline_minutes: float = 360
     initial_hour: float = 0
     ev_speed_kmh: float = 30
     car_speed_kmh: float = 50
-    step_seconds: float = 1
+    step_seconds: float = 60
     samples: int = 32
     background_cars: int = ENVIRONMENT["cars"]
-    burst_size: int = 100
     compliance: float = 0.8
     defer_probability: float = 0.05
     decline_probability: float = 0.0
@@ -54,10 +53,6 @@ class RunConfig:
     environment_version: str = ENVIRONMENT_VERSION
     private_evs: int = ENVIRONMENT["private_evs"]
     electric_taxis: int = ENVIRONMENT["electric_taxis"]
-    private_frequency: float = ENVIRONMENT["private_opportunities_per_day"]
-    taxi_frequency: float = ENVIRONMENT["taxi_opportunities_per_day"]
-    soc_threshold: float = ENVIRONMENT["eligibility_soc"]
-    target_soc: float = ENVIRONMENT["target_soc"]
     rush_enabled: bool = True
     rush_extra_percent: float = ENVIRONMENT["rush_extra_percent"]
     objective_version: str = OBJECTIVE_VERSION
@@ -72,18 +67,19 @@ class RunConfig:
     partition_end: float = -1.0
     behavior_case: str = "moderate"
     stabilization: str = "off"
-    failure_beta: float = ENVIRONMENT["failure_beta"]
-    energy_beta: float = ENVIRONMENT["energy_beta"]
+    objective_config_hash: str = OBJECTIVE_CONFIG_HASH
     station_events: str = ""
     calibration: str = ""
     timeout_seconds: float = 21600
 
     def __post_init__(self):
+        if self.objective_config_hash != OBJECTIVE_CONFIG_HASH or ENVIRONMENT["objective_config_hash"] != OBJECTIVE_CONFIG_HASH:
+            raise ValueError("Objective configuration hash mismatch")
         if self.objective_version != OBJECTIVE_VERSION or self.observation_version != OBSERVATION_VERSION:
             raise ValueError("Objective/observation schema changed")
         if self.stabilization not in {"off", "smoothing", "smoothing_hysteresis"} or self.behavior_case not in {"high", "moderate", "low", "contextual", "misspecified"}:
             raise ValueError("Unknown design configuration")
-        for field in ("temperature", "p2p_interval", "min_send_seconds", "failure_beta", "energy_beta"):
+        for field in ("temperature", "p2p_interval", "min_send_seconds"):
             if not math.isfinite(getattr(self, field)) or getattr(self, field) <= 0:
                 raise ValueError(f"Invalid {field}")
         if not 0 <= self.packet_loss <= 1 or not 0 <= self.duplicate_probability <= 1 or not math.isfinite(self.delay_minutes) or self.delay_minutes < 0:
@@ -103,17 +99,13 @@ class RunConfig:
             raise ValueError("Unknown GAMA method/scenario")
         if self.environment_version != ENVIRONMENT_VERSION:
             raise ValueError("Environment changed: recalibrate and retrain")
-        for name in ("private_frequency", "taxi_frequency"):
-            if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
-                raise ValueError(f"Invalid {name}")
+        validate_behavior_config(ENVIRONMENT)
         if (
             not math.isfinite(self.consumption_kwh_km)
             or self.consumption_kwh_km < 0
             or not 0 < self.charge_efficiency <= 1
         ):
             raise ValueError("Invalid physical energy configuration")
-        if not 0 < self.soc_threshold <= self.target_soc <= 100:
-            raise ValueError("Invalid charging SOC thresholds")
         if (
             not math.isfinite(self.rush_extra_percent)
             or not 0 <= self.rush_extra_percent <= 30
@@ -136,7 +128,6 @@ class RunConfig:
         if (
             self.samples < 1
             or self.background_cars < 0
-            or self.burst_size < 0
             or self.warmup_minutes < 0
         ):
             raise ValueError("Invalid nonnegative count/duration")
@@ -150,19 +141,13 @@ class RunConfig:
             "background_cars",
             "private_evs",
             "electric_taxis",
-            "burst_size",
         ):
             if type(getattr(self, name)) is not int or getattr(self, name) < 0:
                 raise ValueError(f"{name} must be an integer")
+        if not self.development and (self.warmup_minutes,self.measure_minutes,self.deadline_minutes,self.step_seconds)!=(360,3600,360,60):
+            raise ValueError("Official protocol requires 6h/60h/6h and 60-second steps")
         if not self.development and not self.calibration:
             raise ValueError("Official runs require train-only GAMA calibration")
-
-    @property
-    def demand_rate(self) -> float:
-        return (
-            self.private_evs * self.private_frequency
-            + self.electric_taxis * self.taxi_frequency
-        ) / 1440
 
     @classmethod
     def load(cls, path: Path) -> RunConfig:
@@ -180,6 +165,7 @@ class RunConfig:
                 data["calibration"] = str(canonical)
         if data.get("calibration"):
             calibration = json.loads(Path(data["calibration"]).read_text())
+            validate_objective_identity(calibration)
             if (
                 calibration.get("environment_version") != ENVIRONMENT_VERSION
                 or calibration.get("source") != provenance()
@@ -218,6 +204,7 @@ def provenance() -> dict[str, Any]:
                 ROOT / "scripts/gui_calibration.py",
                 ROOT / "scripts/java/CheckModel.java",
                 ROOT / "pyproject.toml",
+                ROOT / "tests/gama_queue_pressure.gaml",
             ]
         },
         "python_version": platform.python_version(),
@@ -244,12 +231,13 @@ def parameter_record(
     ):
         raise ValueError(f"{method} needs {expected} finite GAMA parameters")
     return {
-        "schema": "gama-ranr-v3",
+        "schema": "gama-ranr-v4",
         "environment_version": ENVIRONMENT_VERSION,
         "backend": "GAMA",
         "method": method,
         "parameters": parameters,
         "objective_version": OBJECTIVE_VERSION,
+        "objective_config_hash": OBJECTIVE_CONFIG_HASH,
         "observation_version": OBSERVATION_VERSION,
         "features": ["T_travel_charge", "W_mean", "W_P95", "H", "U"],
         "state_features": ["bias", "load", "burst", "exposure_uncertainty", "age"],
@@ -271,6 +259,7 @@ def load_model(path: Path, method: str, config: RunConfig) -> list[float]:
         "objective_version",
         "observation_version",
         "environment_version",
+        "objective_config_hash",
     ):
         if record.get(key) != canonical[key]:
             raise ValueError(f"Invalid model {key}: {path}")
@@ -290,21 +279,16 @@ def load_model(path: Path, method: str, config: RunConfig) -> list[float]:
             "samples",
             "deadline_minutes",
             "background_cars",
-            "burst_size",
             "private_evs",
             "electric_taxis",
-            "private_frequency",
-            "taxi_frequency",
             "consumption_kwh_km",
             "charge_efficiency",
-            "soc_threshold",
-            "target_soc",
             "rush_enabled",
             "rush_extra_percent",
             "environment_version",
             "compliance",
             "defer_probability",
-            "decline_probability", "abandon_after_minutes", "temperature", "p2p_interval", "min_send_seconds", "stabilization", "behavior_case", "failure_beta", "energy_beta", "objective_version", "observation_version",
+            "decline_probability", "abandon_after_minutes", "temperature", "p2p_interval", "min_send_seconds", "stabilization", "behavior_case", "objective_version", "observation_version",
         ):
             if locked.get(key) != getattr(config, key):
                 raise ValueError(f"Model and run configuration differ: {key}")
@@ -333,7 +317,9 @@ def _launch(
             start_new_session=True,
         )
         try:
-            code = process.wait(timeout=timeout)
+            from .monitoring import wait_for_gama
+
+            code = wait_for_gama(process, log, timeout, environment)
         except (subprocess.TimeoutExpired, BaseException):
             import signal
 
@@ -362,7 +348,9 @@ def checked_result(folder: Path, expected: dict) -> dict:
         for name, sha in manifest["artifact_hashes"].items()
     ):
         raise ValueError(f"Run artifact changed: {folder}")
-    return json.loads((folder / "metrics.json").read_text())
+    metrics = json.loads((folder / "metrics.json").read_text())
+    validate_fitness(metrics)
+    return metrics
 
 
 def archive_failed_run(folder: Path) -> Path:
@@ -378,21 +366,24 @@ def archive_failed_run(folder: Path) -> Path:
 
 def last_simulation_minute(folder: Path) -> float | None:
     """Read physical progress, independently of a possibly stale running marker."""
-    import csv
-
     path = folder / "population_population.csv"
     if not path.is_file():
         return None
-    last = None
-    with path.open() as stream:
-        for row in csv.DictReader(stream):
-            try:
-                value = float(row.get("time_min", ""))
-            except (ValueError, TypeError):
-                continue
-            if math.isfinite(value) and value >= 0:
-                last = value
-    return last
+    with path.open("rb") as stream:
+        size = stream.seek(0, 2)
+        stream.seek(max(0, size - 65536))
+        rows = stream.read().split(b"\n")
+    # Ignore both a truncated first line and an unfinished final write.
+    if size > 65536:
+        rows = rows[1:]
+    for row in reversed(rows[:-1]):
+        try:
+            value = float(row.split(b",", 1)[0])
+        except ValueError:
+            continue
+        if math.isfinite(value) and value >= 0:
+            return value
+    return None
 
 
 def run(
@@ -504,8 +495,7 @@ def run(
             "ranr_partition_end": config.partition_end,
             "ranr_behavior_case": config.behavior_case,
             "ranr_stabilization": config.stabilization,
-            "ranr_failure_beta": config.failure_beta,
-            "ranr_energy_beta": config.energy_beta,
+            "ranr_objective_config_hash": config.objective_config_hash,
             "ranr_station_events_file": str(folder/"station_events.json") if config.station_events else "",
             "ranr_method": config.method,
             "ranr_case": config.case,
@@ -530,15 +520,10 @@ def run(
             "cars": config.background_cars,
             "privates": config.private_evs,
             "taxis": config.electric_taxis,
-            "ranr_private_frequency": config.private_frequency,
-            "ranr_taxi_frequency": config.taxi_frequency,
-            "ranr_soc_threshold": config.soc_threshold,
-            "target_soc": config.target_soc,
             "consumption_kwh_km": config.consumption_kwh_km,
             "charge_efficiency": config.charge_efficiency,
             "have_rush": config.rush_enabled,
             "rush_extra_percent": config.rush_extra_percent,
-            "ranr_burst_size": config.burst_size,
             "step": config.step_seconds,
             "initial_hour": config.initial_hour,
             "ranr_ev_speed": config.ev_speed_kmh,
@@ -577,16 +562,11 @@ def run(
             + "\n"
             + (folder / "launch.log").read_text(errors="replace")
         )
-        failures = (
-            "Runtime error",
-            "Assert failed",
-            "Error in",
-            "Exception",
-            "No parameter named",
-            "RANR_ERROR",
-        )
+        from .monitoring import classify_console
+        failures, warnings = classify_console(console)
+        write_json(folder / "runtime_warnings.json", warnings)
         if (
-            any(x in console for x in failures)
+            failures
             or f"RANR_COMPLETE {run_id}" not in console
         ):
             raise RuntimeError(
@@ -600,6 +580,8 @@ def run(
             completion.get("run_id") != run_id
             or completion.get("status") != "complete"
             or metrics.get("run_id") != run_id
+            or completion.get("finished_min", -1) + 1e-8
+            < config.warmup_minutes + config.measure_minutes + config.deadline_minutes
         ):
             raise ValueError("Stale or invalid completion")
         if (
@@ -643,11 +625,13 @@ def run(
             raise ValueError("Station event scenario changed during execution")
         if provenance() != inputs["source"]:
             raise ValueError("Source changed during GAMA run")
-        validate_ledger(json.loads((folder / "opportunities.json").read_text()), json.loads((folder / "opportunity_outcomes.json").read_text()), outcomes)
-        if abs(rescore_components(metrics["objective_components"]) - metrics["objective"]) > 1e-6:
+        validate_fitness(metrics)
+        validate_charging_files(folder)
+        write_json(folder / "physical_validation.json", validate_physical_records(folder, asdict(config)))
+        if abs(rescore_components(metrics["objective_components"]) - metrics["operational_objective"]) > 1e-6:
             raise ValueError("Objective decomposition mismatch")
-        if not config.development and not config.calibrating and not metrics["fitness_valid"]:
-            raise ValueError("No measurement opportunities: invalid candidate fitness")
+        validate_fitness(metrics)
+        metrics.update(case=config.case, seed=config.seed)
         metrics["wall_seconds"] = time.perf_counter() - started
         resources = [json.loads(p.read_text()) for p in folder.glob("*.resources.json")]
         metrics["cpu_seconds"] = sum(
@@ -658,7 +642,8 @@ def run(
             "".join(
                 digest(folder / name)
                 for name in (
-                    "opportunities.json",
+                    "activity_plan.json",
+                    "vehicle_traits.json",
                     "traffic_plan.json",
                     "initial_fleet.json",
                 )
@@ -674,6 +659,7 @@ def run(
         write_json(folder / "manifest.json", manifest)
         return metrics
     except BaseException as error:
+        manifest.update(fitness_valid=False,fitness_vector=None,failure_reason=str(error))
         if isinstance(error, subprocess.TimeoutExpired):
             last = last_simulation_minute(folder)
             target = (
@@ -694,6 +680,10 @@ def run(
             manifest.update(status="failed", error=message, finished_at=time.time())
             write_json(folder / "manifest.json", manifest)
             raise TimeoutError(message) from error
-        manifest.update(status="failed", error=str(error), finished_at=time.time())
+        manifest.update(status="failed", error=str(error),
+                        error_type=("interrupted" if isinstance(error, (KeyboardInterrupt, SystemExit))
+                                    else getattr(error, "error_type", type(error).__name__)),
+                        last_simulated_minutes=last_simulation_minute(folder),
+                        finished_at=time.time())
         write_json(folder / "manifest.json", manifest)
         raise
