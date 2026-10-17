@@ -160,7 +160,18 @@ def verify_native(path):
         fixture = read_reference(item)
         marker = fixture.get("marker")
         console = fixture.get("console", "")
-        if fixture.get("source") != provenance() or not marker or marker not in console or classify_console(console)[0]:
+        failures = classify_console(console)[0]
+        # These fixtures deliberately call ranr_abort and assert the exact guard
+        # reason before emitting PASS. Unknown runtime/assertion/JVM errors remain
+        # fatal, including in a negative fixture.
+        expected_abort = (
+            fixture.get("model") == "models/tests/RanrStartupFailureTests.gaml" and marker == "RANR_STARTUP_FAILURE_PASS"
+        ) or (
+            fixture.get("model") == "models/tests/RanrLifecycleTests.gaml" and str(marker).startswith("RANR_CONFIGURATION_GUARD_PASS ")
+        )
+        if expected_abort:
+            failures = [line for line in failures if not line.startswith("RANR_ERROR: ")]
+        if fixture.get("source") != provenance() or not marker or marker not in console or failures:
             raise ValueError("Invalid native fixture evidence")
         markers.add(marker)
     required = {"RANR_OBJECTIVE_PASS", "RANR_PHYSICAL_PASS", "RANR_DECISION_PASS", "RANR_PROTOCOL_PASS",

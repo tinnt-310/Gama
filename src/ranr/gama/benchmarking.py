@@ -168,7 +168,10 @@ def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours:
         gate = {"passed":True,"source":source,**accuracy,"locked_config":locked.__dict__,
                 "calibration_sha256":digest(Path(config.calibration)), "thresholds":THRESHOLDS,
                 "fitness_tolerances":FITNESS_TOLERANCES,
-                "dependencies":[reference(folder/name) for name in ("accuracy.json","reference_stability.json","physical_steps.json")]}
+                "dependencies":[reference(folder/name) for name in ("accuracy.json","reference_stability.json","physical_steps.json")]
+                    + [reference(path) for path in sorted(folder.glob("probes_*.csv"))]
+                    + [reference(path) for directory in ("physical_reference","physical_steps")
+                       for path in sorted((folder/directory).rglob("manifest.json"))]}
         if provenance()!=source: raise ValueError("Source changed during accuracy benchmark")
         write_json(folder/"accuracy_gate.json",gate)
         write_json(folder/"accuracy_config.json",locked.__dict__)

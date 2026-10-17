@@ -203,3 +203,34 @@ class ReleaseContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'changed'):evaluate_models(config,models,folder)
         jobs.assert_not_called()
         self.assertEqual(before,(folder/'registration.json').read_bytes())
+
+    def test_native_evidence_allows_only_expected_negative_fixture_abort(self):
+        from ranr.gama.evidence import verify_native
+        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_STARTUP_FAILURE_PASS']
+        references=[]
+        for i,marker in enumerate(markers):
+            console=marker
+            model='models/tests/RanrStartupFailureTests.gaml' if marker=='RANR_STARTUP_FAILURE_PASS' else 'other'
+            if marker=='RANR_STARTUP_FAILURE_PASS':console+='\nRANR_ERROR: CALIBRATION NOT READY: fixture registration failure'
+            path=self.root/f'fixture_{i}.json'
+            write_json(path,{'source':{'unit':True},'model':model,'marker':marker,'console':console})
+            references.append(reference(path))
+        native=self.root/'validation.json'
+        write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
+        with patch('ranr.gama.evidence.provenance',return_value={'unit':True}):
+            verify_native(native)
+            path=self.root/'fixture_6.json'
+            record=json.loads(path.read_text());record['console']+='\nRuntime error: unexpected physical failure';write_json(path,record)
+            references[-1]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
+            with self.assertRaisesRegex(ValueError,'Invalid native'):verify_native(native)
+            record['console']='RANR_STARTUP_FAILURE_PASS\nRANR_ERROR: failure';record['model']='another-model';write_json(path,record)
+            references[-1]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
+            with self.assertRaises(ValueError):verify_native(native)
+
+    def test_csv_evidence_hash_is_verified_without_json_decoding(self):
+        path=self.root/'probe.csv';path.write_text('mean,p95,externality\n0,0,0\n')
+        proof=self.root/'proof.json';write_json(proof,{'passed':True,'source':{'unit':True},'dependencies':[reference(path)]})
+        with patch('ranr.gama.evidence.provenance',return_value={'unit':True}):
+            read_evidence(proof)
+            path.write_text('mean,p95,externality\n0,0,99999\n')
+            with self.assertRaisesRegex(ValueError,'Evidence changed'):read_evidence(proof)
