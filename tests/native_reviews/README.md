@@ -18,3 +18,12 @@ Both run through `ranr.gama.validation.run_model`, using experiments
 Delivery evidence records each fixture's SHA-256 explicitly because these
 additional test files are outside the production `models/` provenance glob.
 The original full native suite has not been relabeled as executing this commit.
+
+`RanrPairedPhysicalReplay.gaml` replays sealed physical arrival/SOC/power and
+cancellation schedules into two actual charging-station branches, removing only
+the selected EV in the control branch. It does not call `ranr_estimate` or use
+shadow output as truth. The Python delivery harness reconstructs inputs and
+checks native insertion-branch waiting against observed service starts before
+scoring H. Engineering checks on calibration traces reproduced130 observed
+waiting times exactly across sid0/2/7/9. These checks are not independent R01
+acceptance; that protocol uses920001–920006 after its prerequisite gate passes.
