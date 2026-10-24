@@ -113,7 +113,8 @@ class GuiCollection(unittest.TestCase):
             ],
         )
         (self.folder / "events.csv").write_text("request_id,terminal_record,time_min,leg\nr1,arrival,5.0,0\n")
-        (self.folder / "demand.csv").write_text("request_id\nr1\n")
+        (self.folder / "demand.csv").write_text("request_id,issued_min,energy_kwh,initial_soc,intent_id,target_soc\nr1,0,10,29,i1,"+str((17.4+10.)/60.*100.)+"\n")
+        (self.folder / "demand_energy_updates.csv").write_text("request_id,at,reason,required_kwh,target_soc,soc\n")
         for name in ("activity_plan.json", "vehicle_traits.json", "traffic_plan.json", "initial_fleet.json"):
             write_json(self.folder / name, [])
         intents, attempts, outcomes, resolutions = ledger_fixture(created=0.,finished=25.)
@@ -132,6 +133,9 @@ class GuiCollection(unittest.TestCase):
         metrics.update(fitness_fixture(seed=config['seed']),planned_ev_days=config['measure_minutes']/1440.)
         metrics['objective_components']=dict(version='intent-service-5',objective_config_hash=OBJECTIVE_CONFIG_HASH,
             fitness_valid=True,time_component=0.,tail_component=0.,queue_component=0.)
+        metrics.update(measurement_intent_count=0,waiting_sample_count=0,mean_completed_time_min=None,
+            mean_wait_min=None,p95_wait_min=None,conditional_success_rate=None,conditional_on_time_rate=None,queue_pressure=0.)
+        write_json(self.folder/'queue_history.json',[])
         write_json(self.folder/'metrics.json',metrics)
 
 
@@ -145,6 +149,22 @@ class GuiCollection(unittest.TestCase):
         write_json(self.folder/'completion.json',marker)
         (self.folder/'demand.csv').write_text('request_id\n')
         with self.assertRaisesRegex(ValueError,'physical charging need'):
+            gui.complete(self.folder)
+
+    def test_independent_raw_metric_recalculation_rejects_self_consistent_forgery(self):
+        self.finish_files()
+        path=self.folder/'metrics.json'
+        metrics=json.loads(path.read_text())
+        metrics['operational_objective']=1.
+        metrics['fitness_vector'][-1]=1.
+        metrics['objective_components']['time_component']=1.
+        write_json(path,metrics)
+        with self.assertRaisesRegex(ValueError,'Objective component differs'):
+            gui.complete(self.folder)
+        self.finish_files()
+        metrics=json.loads(path.read_text());metrics['mean_wait_min']=0.
+        write_json(path,metrics)
+        with self.assertRaisesRegex(ValueError,'Metric differs'):
             gui.complete(self.folder)
 
     def test_missing_active_interval_is_invalid(self):

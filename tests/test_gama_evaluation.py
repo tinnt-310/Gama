@@ -31,7 +31,7 @@ class EvaluationLedger(unittest.TestCase):
         a.append(dict(a[0],request_id='r1',attempt_id='r1',key=2,at=6.,attempt=2))
         o.append(dict(o[0],request_id='r1',attempt_id='r1',key=2,status='completed',delivered_kwh=10.,issued_min=6.,finished_min=23.,travel_min=3.,waiting_min=4.,charging_min=10.,service_time_min=17.))
         f[0].update(finished_min=23.,actual_completion_time=23.,completion_time_min=18.,retry_delay_min=1.)
-        i[0]['attempts']=2;f[0]['attempt_ids']=['r0','r1']
+        i[0]['attempts']=2;f[0]['attempts']=2;f[0]['attempt_ids']=['r0','r1']
         self.assertTrue(validate_charging_ledger(*rows));self.assertEqual(f[0]['requested_kwh'],10.)
         f[0]['requested_kwh']=20.
         with self.assertRaisesRegex(ValueError,'energy duplicated'):validate_charging_ledger(*rows)

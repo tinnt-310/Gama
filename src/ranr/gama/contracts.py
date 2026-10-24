@@ -56,6 +56,8 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
     energy_tol = OBJECTIVE_SPEC["energy_abs_tol_kwh"]
     groups = {k: [] for k in needs}
     for attempt in attempts:
+        if not finite_tree(attempt):
+            raise ValueError('Nonfinite attempt fields')
         identity = attempt["intent_id"]
         if identity not in needs or attempt["vehicle_id"] != needs[identity]["vehicle_id"]:
             raise ValueError("Orphan or mismatched request")
@@ -66,6 +68,8 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
         result = results[attempt["request_id"]]
         if result["status"] not in TERMINAL or result["intent_id"] != identity or result["vehicle_id"] != attempt["vehicle_id"] or result["key"] != attempt["key"]:
             raise ValueError("Attempt outcome identity/status mismatch")
+        if result.get('attempt_id') != attempt['attempt_id']:
+            raise ValueError('Attempt outcome attempt_id mismatch')
         if any(result.get(f,-1)<0 for f in ("travel_min","waiting_min","charging_min")) or abs(result["service_time_min"]-sum(result[f] for f in ("travel_min","waiting_min","charging_min")))>time_tol:
             raise ValueError("Invalid attempt duration accounting")
         if result["status"]=="completed" and result["requested_kwh"]-result["delivered_kwh"]>energy_tol:
@@ -85,6 +89,8 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
             raise ValueError("Invalid immutable intent deadline")
         if row["vehicle_id"] != intent["vehicle_id"] or row["status"] not in INTENT_TERMINAL or abs(row["issued_min"] - intent["at"]) > time_tol:
             raise ValueError("Intent outcome identity/status mismatch")
+        if intent['status'] != row['status']:
+            raise ValueError('Intent closure state differs from its outcome')
         if intent["cause"] == "low_soc" and intent["soc_at_need"] > intent["threshold"] + 1e-6:
             raise ValueError("Low-SOC intent above threshold")
         group = sorted(groups[identity], key=lambda x: x["attempt"])
@@ -95,7 +101,18 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
         for field in ('initial_required_kwh', 'battery_capacity_kwh', 'initial_battery_kwh'):
             if field in intent and abs(row[field] - intent[field]) > energy_tol:
                 raise ValueError('Immutable intent energy mismatch: ' + field)
+        for field in ('key', 'kind', 'cause', 'activity', 'measured'):
+            if field in intent and row.get(field) != intent[field]:
+                raise ValueError('Immutable intent field mismatch: ' + field)
+        for field in ('at', 'trip_energy_kwh', 'initial_metres', 'initial_charged_kwh'):
+            if field in intent and (field not in row or abs(row[field] - intent[field]) > (time_tol if field == 'at' else energy_tol)):
+                raise ValueError('Immutable intent field mismatch: ' + field)
         children = [results[r['request_id']] for r in group]
+        if any(child['requested_kwh'] > row['requested_kwh'] + energy_tol for child in children):
+            raise ValueError('Attempt requested energy exceeds complete intent demand')
+        for child in children:
+            if 'energy_complete' in child and child['energy_complete'] is not (child['requested_kwh'] - child['delivered_kwh'] <= energy_tol):
+                raise ValueError('Attempt energy completion flag inconsistent')
         if any(child['finished_min'] > row['finished_min'] + time_tol for child in children):
             raise ValueError('Attempt finishes after intent')
         if any(results[a['request_id']]['finished_min'] > b['at'] + time_tol for a, b in zip(group, group[1:])):
@@ -110,6 +127,8 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
             raise ValueError('Intent completion differs from final attempt')
         if [r["attempt"] for r in group] != list(range(1, len(group)+1)) or intent["attempts"] != len(group):
             raise ValueError("Missing or repeated recommendation attempt")
+        if type(row.get('attempts')) is not int or row['attempts'] != len(group):
+            raise ValueError('Intent outcome attempt total mismatch')
         if any(b["at"] <= a["at"] for a,b in zip(group,group[1:])):
             raise ValueError("Retry has no elapsed time")
         if row["attempt_ids"] != [r["attempt_id"] for r in group]:
@@ -164,9 +183,91 @@ def planned_ev_days(initial_fleet, traffic_plan, start, end):
     return result
 
 
+def validate_request_energy_files(folder, intents, attempts, outcomes):
+    """Rebuild each attempt's final requested energy from its initial demand and updates."""
+    import csv
+    needs = _unique(intents, 'intent_id')
+    requests = _unique(attempts, 'request_id')
+    results = _unique(outcomes, 'request_id')
+    with (folder/'demand.csv').open() as stream:
+        demands = _unique(list(csv.DictReader(stream)), 'request_id')
+    if demands.keys() != requests.keys():
+        raise ValueError('Demand/attempt identities differ')
+    time_tol = OBJECTIVE_SPEC['time_tol_min']
+    energy_tol = OBJECTIVE_SPEC['energy_abs_tol_kwh']
+    soc_tol = OBJECTIVE_SPEC['soc_tol_percent']
+    def number(row, field):
+        try:
+            value = float(row[field])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError('Missing or invalid demand energy field: ' + field) from error
+        if not math.isfinite(value):
+            raise ValueError('Nonfinite demand energy field: ' + field)
+        return value
+    requested = {}
+    latest = {}
+    for identity, attempt in requests.items():
+        demand = demands[identity]
+        intent = needs[attempt['intent_id']]
+        if demand.get('intent_id') != attempt['intent_id'] or abs(number(demand,'issued_min') - attempt['at']) > time_tol:
+            raise ValueError('Demand immutable identity/time mismatch')
+        if abs(number(demand,'target_soc') - intent['target_soc']) > soc_tol:
+            raise ValueError('Demand target SOC differs from immutable intent')
+        soc = number(demand, 'initial_soc')
+        if not 0 <= soc <= 100:
+            raise ValueError('Invalid demand initial SOC')
+        requested[identity] = number(demand,'energy_kwh')
+        initial = max(0.0, (intent['target_soc'] - soc)*intent['battery_capacity_kwh']/100.)
+        if requested[identity] < 0 or abs(requested[identity] - initial) > energy_tol:
+            raise ValueError('Demand energy differs from initial request SOC/target')
+        latest[identity] = attempt['at']
+    with (folder/'demand_energy_updates.csv').open() as stream:
+        for update in csv.DictReader(stream):
+            identity = update['request_id']
+            if identity not in requests:
+                raise ValueError('Energy update has no physical attempt')
+            at = number(update, 'at')
+            energy = number(update, 'required_kwh')
+            intent = needs[requests[identity]['intent_id']]
+            if at < latest[identity]-time_tol or at > results[identity]['finished_min']+time_tol:
+                raise ValueError('Demand energy update is out of order or after termination')
+            if energy < 0 or abs(number(update,'target_soc') - intent['target_soc']) > soc_tol:
+                raise ValueError('Invalid energy update or changed immutable target')
+            if not 0 <= number(update,'soc') <= 100:
+                raise ValueError('Invalid energy update SOC')
+            requested[identity] = energy
+            latest[identity] = at
+    for identity, energy in requested.items():
+        if abs(results[identity]['requested_kwh'] - energy) > energy_tol:
+            raise ValueError('Attempt requested energy differs from demand update ledger')
+    return True
+
+
+def recompute_intent_metrics(outcomes, start, end, pressure):
+    """Independent arithmetic over observed intent facts, never a simulator."""
+    cohort = [r for r in outcomes if start <= r['issued_min'] < end]
+    completed = [r['completion_time_min'] for r in cohort if r['status']=='completed']
+    waits = sorted(r['waiting_min'] for r in cohort if r['queue_eligible'])
+    mean = lambda values: sum(values)/len(values) if values else None
+    p95 = None
+    if waits:
+        position=.95*(len(waits)-1)
+        low=math.floor(position);high=math.ceil(position)
+        p95=waits[low]+(position-low)*(waits[high]-waits[low])
+    completion = mean(completed)
+    components = dict(time_component=.5*(completion or 0.)/360.,
+                      tail_component=.3*(p95 or 0.)/360.,queue_component=.2*pressure)
+    return dict(measurement_intent_count=len(cohort),waiting_sample_count=len(waits),
+                mean_completed_time_min=completion,mean_wait_min=mean(waits),p95_wait_min=p95,
+                conditional_success_rate=len(completed)/len(cohort) if cohort else None,
+                conditional_on_time_rate=sum(r['on_time'] for r in cohort)/len(cohort) if cohort else None,
+                operational_objective=sum(components.values()),objective_components=components)
+
+
 def validate_charging_files(folder):
     load = lambda name: json.loads((folder/name).read_text())
     validate_charging_ledger(*(load(n) for n in ("charging_intents.json","request_attempts.json","outcomes.json","intent_outcomes.json")))
+    validate_request_energy_files(folder, load('charging_intents.json'), load('request_attempts.json'), load('outcomes.json'))
     metrics = load("metrics.json")
     validate_objective_identity(metrics)
     config = load("configuration.json")
@@ -209,6 +310,29 @@ def validate_charging_files(folder):
         if r["status"]=="completed" and (r["actual_start"] is None or r["actual_completion"] is None or r["actual_completion"]<r["actual_start"]):
             raise ValueError("Invalid mobility completion")
     cohort=[r for r in outcomes if start<=r["issued_min"]<end]
+    history=load('queue_history.json')
+    observed_pressure=0.
+    for row in history:
+        if (not finite_tree(row) or len(row.get('pressure',[]))!=11 or
+            any(not 0 <= value <= 1 for value in row['pressure'])):
+            raise ValueError('Invalid physical queue-pressure history')
+        observed_pressure=max(observed_pressure,max(row['pressure']))
+    pressure=metrics['queue_pressure']
+    if not math.isfinite(pressure) or not 0 <= pressure <= 1 or pressure+1e-7 < observed_pressure:
+        raise ValueError('Queue pressure differs from observed history')
+    # At sub-minute steps exported minute history is only a lower bound. Never
+    # claim it contains all sub-minute maxima; official60s runs record every tick.
+    if config['step_seconds'] >= 60 and abs(pressure-observed_pressure)>1e-7:
+        raise ValueError('Queue pressure differs from complete tick history')
+    independent=recompute_intent_metrics(outcomes,start,end,pressure)
+    for field,value in independent.items():
+        if field=='objective_components':
+            for name,component in value.items():
+                if abs(metrics[field][name]-component)>1e-6:
+                    raise ValueError('Objective component differs from raw intent ledger: '+name)
+        elif field not in metrics or (value is None and metrics[field] is not None) or (
+                value is not None and (metrics[field] is None or not math.isfinite(metrics[field]) or abs(metrics[field]-value)>1e-6)):
+            raise ValueError('Metric differs from raw intent ledger: '+field)
     unmet=sum(0. if r["energy_complete"] else max(0.,r["requested_kwh"]-r["delivered_kwh"]) for r in cohort)
     missed=sum(not r["on_time"] for r in cohort)
     unserved=sum(start<=r["at"]<end and r["status"]!="completed" for r in mobility)
@@ -315,6 +439,17 @@ def validate_configuration(actual, config):
     return True
 
 
+def validate_event_identity(row, attempt, intent=None):
+    """Link exported physical events to the immutable request and intent identity."""
+    if ('vehicle_id' in row and int(row['vehicle_id']) != attempt['vehicle_id']) or (
+        'intent_id' in row and row['intent_id'] != attempt.get('intent_id')):
+        raise ValueError('Physical event vehicle/intent identity mismatch')
+    if intent is not None and (not math.isfinite(float(row['target_soc'])) or
+            abs(float(row['target_soc']) - intent['target_soc']) > OBJECTIVE_SPEC['soc_tol_percent']):
+        raise ValueError('Physical event target SOC differs from immutable intent')
+    return True
+
+
 def validate_physical_records(folder, config):
     """Independently audit GAMA artifacts; never simulate or synthesize EV behavior."""
     import csv
@@ -344,6 +479,8 @@ def validate_physical_records(folder, config):
         raise ValueError("Charging station/port inventory differs")
     attempts = {row["request_id"]: row for row in records("request_attempts.json")}
     outcomes = {row['request_id']: row for row in records('outcomes.json')}
+    intents = records('charging_intents.json')
+    intent_by_id = _unique(intents, 'intent_id')
     active_ports, active_requests = {}, {}
     terminal_energy = defaultdict(float)
     terminal_ids = set()
@@ -355,6 +492,7 @@ def validate_physical_records(folder, config):
             identity = row["request_id"]
             if identity not in attempts:
                 raise ValueError("Session event has no physical request")
+            validate_event_identity(row, attempts[identity], intent_by_id.get(attempts[identity].get('intent_id')))
             event = row["terminal_record"]
             key=(identity,row.get("token",""),row.get("leg",""),event,row["time_min"])
             if key in event_keys:
@@ -467,8 +605,14 @@ def validate_physical_records(folder, config):
                 if sum(value == category for value in present.values()) > math.floor(base * config["rush_extra_percent"] / 100):
                     raise ValueError("Concurrent inbound vehicle cap exceeded")
             peak_inbound = max(peak_inbound, len(present))
-    intents = records("charging_intents.json")
     for intent in intents:
+        trait = traits[int(intent['vehicle_id'])]
+        if (intent['kind'] != trait['kind']
+            or abs(intent['battery_capacity_kwh'] - trait['battery_capacity_kwh']) > OBJECTIVE_SPEC['energy_abs_tol_kwh']
+            or abs(intent['threshold'] - trait['soc_request_threshold']) > OBJECTIVE_SPEC['soc_tol_percent']
+            or not trait['soc_preferred_target'] - OBJECTIVE_SPEC['soc_tol_percent'] <= intent['target_soc'] <= 100
+            or not 0 <= intent['soc_at_need'] <= 100):
+            raise ValueError('Intent differs from immutable physical EV traits')
         if intent["at"] >= config["warmup_minutes"] + config["measure_minutes"]:
             raise ValueError("New charging intent generated during drain")
         if intent["cause"] in {"trip_energy", "shift_energy"} and intent["trip_energy_kwh"] <= intent["soc_at_need"] * traits[int(intent["vehicle_id"])]["battery_capacity_kwh"] / 100 + 1e-7:

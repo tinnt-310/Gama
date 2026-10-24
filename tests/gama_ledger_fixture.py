@@ -22,6 +22,7 @@ def ledger_fixture(created=5., finished=22., status='completed', delivered=10.):
         right_censored=status=='unresolved',queue_eligible=True,attempt_ids=['r1'],final_soc=90.,target_soc=90.)
     target=(17.4+10.)/60.*100.
     intent['target_soc']=target
+    intent.update(battery_capacity_kwh=60.,initial_required_kwh=10.,initial_battery_kwh=17.4)
     final.update(target_soc=target,final_soc=(17.4+delivered)/60.*100.,battery_capacity_kwh=60.)
     return [intent],[attempt],[outcome],[final]
 
