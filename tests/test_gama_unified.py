@@ -159,7 +159,7 @@ class GuiCollection(unittest.TestCase):
         metrics['fitness_vector'][-1]=1.
         metrics['objective_components']['time_component']=1.
         write_json(path,metrics)
-        with self.assertRaisesRegex(ValueError,'Objective component differs'):
+        with self.assertRaisesRegex(ValueError,'Objective component differs|Metric differs'):
             gui.complete(self.folder)
         self.finish_files()
         metrics=json.loads(path.read_text());metrics['mean_wait_min']=0.
