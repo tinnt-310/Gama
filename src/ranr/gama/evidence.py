@@ -6,6 +6,7 @@ calibration import; headless runs, checkpoints and published models stay strict.
 from pathlib import Path
 import json
 import math
+import re
 from ..paths import digest, write_json
 from .headless import provenance, checked_result, RunConfig, ENVIRONMENT_VERSION
 from .contracts import (OBJECTIVE_CONFIG_HASH, validate_configuration,
@@ -47,21 +48,27 @@ def validate_collection(folder, compatibility=None):
         if compatibility is None:
             raise ValueError(f"Historical calibration needs verified compatibility: {folder}")
         proof = read_evidence(compatibility)
-        if proof.get("kind") != "calibration_compatibility":
-            raise ValueError("Wrong compatibility evidence kind")
-        validate_compatibility_sources(source, provenance(), proof["reviewed_changes"])
-        if proof.get("runs", {}).get(str(folder)) != digest(folder / "manifest.json"):
-            raise ValueError("Collection not covered by compatibility evidence")
-        replay = read_reference(proof["reproducibility"])
-        if replay.get("passed") is not True or replay.get("source") != provenance():
-            raise ValueError("Current reproducibility evidence required")
-        # Re-read the linked original manifests and replay inputs, not just booleans.
-        for item in replay.get("dependencies", []):
-            verify_reference(item)
-        for path in [*replay.get("replays", []), replay.get("gui")]:
-            if not path:
-                raise ValueError("Replay lacks its physical runs")
-            checked_result(Path(path), {"source": provenance()})
+        if proof.get("kind") == "headless_calibration_transition":
+            from .transition import verify_transition
+            verify_transition(compatibility)
+            if proof.get("runs", {}).get(str(folder)) != digest(folder / "manifest.json"):
+                raise ValueError("Collection not covered by headless transition")
+        else:
+            if proof.get("kind") != "calibration_compatibility":
+                raise ValueError("Wrong compatibility evidence kind")
+            validate_compatibility_sources(source, provenance(), proof["reviewed_changes"])
+            if proof.get("runs", {}).get(str(folder)) != digest(folder / "manifest.json"):
+                raise ValueError("Collection not covered by compatibility evidence")
+            replay = read_reference(proof["reproducibility"])
+            if replay.get("passed") is not True or replay.get("source") != provenance():
+                raise ValueError("Current reproducibility evidence required")
+            # Re-read the linked original manifests and replay inputs, not just booleans.
+            for item in replay.get("dependencies", []):
+                verify_reference(item)
+            for path in [*replay.get("replays", []), replay.get("gui")]:
+                if not path:
+                    raise ValueError("Replay lacks its physical runs")
+                checked_result(Path(path), {"source": provenance()})
     metrics = checked_result(folder, {"source": source})
     config = manifest["config"]
     RunConfig(**config)
@@ -154,6 +161,16 @@ def verify_native(path):
     record = read_evidence(path)
     if not record.get("dependencies"):
         raise ValueError("Native validation has no fixture evidence")
+    execution_source = record.get("execution_source", provenance())
+    if "execution_source" in record:
+        from .transition import verify_transition
+        proof = verify_transition(record["source_transition"]["path"])
+        verify_reference(record["source_transition"])
+        original = read_reference(proof["native_validation"])
+        if original["source"] != execution_source or execution_source != proof["execution_source"]:
+            raise ValueError("Native execution provenance changed")
+        if any(record.get(k) != v for k,v in original.items() if k != "source"):
+            raise ValueError("Reviewed native results differ from original execution")
     markers = set()
     from .monitoring import classify_console
     for item in record["dependencies"]:
@@ -164,15 +181,20 @@ def verify_native(path):
         # These fixtures deliberately call ranr_abort and assert the exact guard
         # reason before emitting PASS. Unknown runtime/assertion/JVM errors remain
         # fatal, including in a negative fixture.
-        expected_abort = (
-            fixture.get("model") == "models/tests/RanrStartupFailureTests.gaml" and marker == "RANR_STARTUP_FAILURE_PASS"
-        ) or (
-            fixture.get("model") == "models/tests/RanrLifecycleTests.gaml" and str(marker).startswith("RANR_CONFIGURATION_GUARD_PASS ")
-        )
-        if expected_abort:
-            failures = [line for line in failures if not line.startswith("RANR_ERROR: ")]
-        if fixture.get("source") != provenance() or not marker or marker not in console or failures:
-            raise ValueError("Invalid native fixture evidence")
+        allowed_errors = set()
+        if fixture.get("model") == "models/tests/RanrStartupFailureTests.gaml" and marker == "RANR_STARTUP_FAILURE_PASS":
+            allowed_errors.add("RANR_ERROR: CALIBRATION NOT READY: fixture registration failure")
+        guard = "RANR_CONFIGURATION_GUARD_PASS"
+        if fixture.get("model") == "models/tests/RanrLifecycleTests.gaml" and (marker == guard or str(marker).startswith(guard + " ")):
+            fields = {"case":"case", "compliance":"compliance", "defer":"defer_probability", "trace":"trace",
+                      "parameters":"parameters", "retry":"energy_retry_minutes", "collection":"collection_seed", "enabled":"enabled"}
+            tags = set(re.findall(r"(?m)^RANR_CONFIGURATION_GUARD_PASS (\w+)\s*$", console))
+            if len(tags) == 1 and next(iter(tags)) in fields:
+                field = fields[next(iter(tags))]
+                allowed_errors.add(f"RANR_ERROR: Configuration changed: {field}; restart required")
+        failures = [line for line in failures if line.strip() not in allowed_errors]
+        if fixture.get("source") != execution_source or not marker or marker not in console or failures:
+            raise ValueError(f"Invalid native fixture evidence: {item['path']}; marker={marker!r}; failures={failures}")
         markers.add(marker)
     required = {"RANR_OBJECTIVE_PASS", "RANR_PHYSICAL_PASS", "RANR_DECISION_PASS", "RANR_PROTOCOL_PASS",
                 "RANR_PORT_CAPACITY_PASS", "RANR_LAST_DAY_PASS"}

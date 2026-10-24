@@ -28,13 +28,18 @@ def require_source(registration):
     if registration['source'] != provenance(): raise ValueError('Release source changed; preserve this registration and start a new release')
 
 
-def initialize(folder, gui=None, resolution=None, review=None, fresh_fallback=True):
+def initialize(folder, gui=None, resolution=None, review=None, fresh_fallback=True, adoption=None):
     if (folder/'registration.json').exists(): raise FileExistsError('Release already registered: use resume')
     config = RunConfig.load(ROOT/'configs/gama/calibration.json')
     if sum(getattr(config,k) for k in ('warmup_minutes','measure_minutes','deadline_minutes'))!=4320:
         raise ValueError('Registered three-day calibration required')
     if shutil.disk_usage(ROOT).free < 40*1024**3: raise ValueError('Need at least 40 GiB free')
-    runs = [OUTPUT/'gui_calibration/runs'/name for name in SELECTED]
+    if adoption:
+        from .transition import verify_transition
+        certificate = verify_transition(adoption)
+        runs = [Path(p) for p in certificate['runs']]
+    else:
+        runs = [OUTPUT/'gui_calibration/runs'/name for name in SELECTED]
     for run in runs:
         manifest = json.loads((run/'manifest.json').read_text())
         checked_result(run,{'source':manifest['source']})
@@ -48,6 +53,7 @@ def initialize(folder, gui=None, resolution=None, review=None, fresh_fallback=Tr
     registration = {'source':provenance(),'created_at':time.time(),'hours_training_only':72,
         'calibration_config':asdict(config),'selected':[str(p) for p in runs],
         'selected_manifests':[reference(p/'manifest.json') for p in runs],
+        'source_transition':reference(adoption) if adoption else None,
         'gui':str(Path(gui).resolve()) if gui else None,'resolution':str(Path(resolution).resolve()) if resolution else None,
         'compatibility_review':str(Path(review).resolve()) if review else None,
         'fresh_fallback':fresh_fallback,'service':f'ranr-release-{time.time_ns()}.service'}
@@ -97,37 +103,50 @@ def execute(folder):
     try:
         # Every release rechecks its own source. Successful stages resume by hash.
         stage('python_tests',[sys.executable,'-B','-m','unittest','discover','-s','tests'],[])
-        stage('native_validation',python+['validate','--compile'],[OUTPUT/'validation.json'])
-        config=replace(RunConfig(**registration['calibration_config']),seed=800001,render=False)
-        replays=[]
-        for i in range(3):
-            config_path=folder/'configs'/f'replay_{i}.json';write_json(config_path,asdict(config))
-            target=folder/'replay'/str(i)
-            stage(f'replay_{i}',python+['--config',str(config_path),'run','--output',str(target),'--resume'],[target/'manifest.json'])
-            replays.append(target)
-        from .replay import compare_runs, replay_report
-        comparisons=[compare_runs(replays[0],p) for p in replays[1:]]
-        write_json(folder/'native_reproducibility.json',{'source':provenance(),'passed':all(r['passed'] for r in comparisons),
-            'comparisons':comparisons,'dependencies':[reference(p/'manifest.json') for p in replays]})
-        if not all(r['passed'] for r in comparisons): raise ValueError('Fresh headless replay diverged; first divergent event recorded. Calibration/training blocked.')
-        legacy=replay_report(registration['selected'],replays,registration['gui'],folder/'legacy_reproducibility.json',
-            OUTPUT/'gui_calibration/runs'/OUTLIER,registration['resolution'])
-        compatibility=None
-        if legacy['passed'] and registration['compatibility_review']:
-            from .evidence import certify_compatibility
-            compatibility=folder/'compatibility.json'
-            certify_compatibility(registration['selected'],registration['compatibility_review'],folder/'legacy_reproducibility.json',compatibility)
-            selected=[Path(p) for p in registration['selected']]
-        elif registration['fresh_fallback']:
-            state['calibration_strategy']='fresh_after_unverified_legacy_replay';save()
-            selected=[replays[0]]
-            for seed in SEEDS[1:]:
-                config_path=folder/'configs'/f'calibration_{seed}.json'
-                write_json(config_path,asdict(replace(config,seed=seed)))
-                target=folder/'fresh_calibration'/str(seed)
-                stage(f'calibration_{seed}',python+['--config',str(config_path),'run','--output',str(target),'--resume'],[target/'manifest.json'])
-                selected.append(target)
-        else: raise ValueError('Historical reuse blocked: fresh GUI replay/causal diagnosis or compatibility review missing; original data retained')
+        adoption = registration.get('source_transition')
+        if adoption:
+            from .evidence import verify_reference
+            from .transition import verify_transition
+            certificate_path = verify_reference(adoption)
+            certificate = verify_transition(certificate_path)
+            stage('native_validation',[sys.executable,'-B','-m','ranr.gama.transition',
+                  '--certificate',str(certificate_path)],[OUTPUT/'validation.json'])
+            selected = [Path(p) for p in certificate['runs']]
+            compatibility = certificate_path
+            state['calibration_strategy'] = 'reviewed_headless_validation_only_transition'
+            save()
+        else:
+            stage('native_validation',python+['validate','--compile'],[OUTPUT/'validation.json'])
+            config=replace(RunConfig(**registration['calibration_config']),seed=800001,render=False)
+            replays=[]
+            for i in range(3):
+                config_path=folder/'configs'/f'replay_{i}.json';write_json(config_path,asdict(config))
+                target=folder/'replay'/str(i)
+                stage(f'replay_{i}',python+['--config',str(config_path),'run','--output',str(target),'--resume'],[target/'manifest.json'])
+                replays.append(target)
+            from .replay import compare_runs, replay_report
+            comparisons=[compare_runs(replays[0],p) for p in replays[1:]]
+            write_json(folder/'native_reproducibility.json',{'source':provenance(),'passed':all(r['passed'] for r in comparisons),
+                'comparisons':comparisons,'dependencies':[reference(p/'manifest.json') for p in replays]})
+            if not all(r['passed'] for r in comparisons): raise ValueError('Fresh headless replay diverged; first divergent event recorded. Calibration/training blocked.')
+            legacy=replay_report(registration['selected'],replays,registration['gui'],folder/'legacy_reproducibility.json',
+                OUTPUT/'gui_calibration/runs'/OUTLIER,registration['resolution'])
+            compatibility=None
+            if legacy['passed'] and registration['compatibility_review']:
+                from .evidence import certify_compatibility
+                compatibility=folder/'compatibility.json'
+                certify_compatibility(registration['selected'],registration['compatibility_review'],folder/'legacy_reproducibility.json',compatibility)
+                selected=[Path(p) for p in registration['selected']]
+            elif registration['fresh_fallback']:
+                state['calibration_strategy']='fresh_after_unverified_legacy_replay';save()
+                selected=[replays[0]]
+                for seed in SEEDS[1:]:
+                    config_path=folder/'configs'/f'calibration_{seed}.json'
+                    write_json(config_path,asdict(replace(config,seed=seed)))
+                    target=folder/'fresh_calibration'/str(seed)
+                    stage(f'calibration_{seed}',python+['--config',str(config_path),'run','--output',str(target),'--resume'],[target/'manifest.json'])
+                    selected.append(target)
+            else: raise ValueError('Historical reuse blocked: fresh GUI replay/causal diagnosis or compatibility review missing; original data retained')
         from .gui_collection import build
         # Do not change a successfully published calibration on resume.
         built=folder/'calibration_selection.json'
@@ -197,6 +216,7 @@ def main():
     parser.add_argument('--outlier-resolution',type=Path)
     parser.add_argument('--compatibility-review',type=Path)
     parser.add_argument('--no-fresh-fallback',action='store_true')
+    parser.add_argument('--adopt-calibration',type=Path,help='Audited validation-only headless source transition certificate')
     args=parser.parse_args()
     folder=args.output
     if folder is None:
@@ -204,7 +224,7 @@ def main():
         else:folder=Path(json.loads((OUTPUT/'release_latest.json').read_text())['output'])
     folder=folder.resolve()
     if args.command=='start':
-        reg=initialize(folder,args.gui_run,args.outlier_resolution,args.compatibility_review,not args.no_fresh_fallback)
+        reg=initialize(folder,args.gui_run,args.outlier_resolution,args.compatibility_review,not args.no_fresh_fallback,args.adopt_calibration)
         def quote(value):return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
         unit=folder/reg['service']
         unit.write_text('[Unit]\nDescription=GAMA RANR scientific release\n\n[Service]\nType=simple\n'

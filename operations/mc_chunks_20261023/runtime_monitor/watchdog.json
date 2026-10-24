@@ -1,0 +1,56 @@
+{
+  "updated_at": 1792753180.7036743,
+  "runtime_pid": 375828,
+  "java_processes": [
+    {
+      "pid": 517980,
+      "start_ticks": "950857",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 3809,
+      "io_bytes": 286720,
+      "stalled": false
+    },
+    {
+      "pid": 491577,
+      "start_ticks": "882776",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 73893,
+      "io_bytes": 3276800,
+      "stalled": false
+    },
+    {
+      "pid": 491875,
+      "start_ticks": "883061",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 73628,
+      "io_bytes": 3231744,
+      "stalled": false
+    },
+    {
+      "pid": 490282,
+      "start_ticks": "880529",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 75557,
+      "io_bytes": 3317760,
+      "stalled": false
+    },
+    {
+      "pid": 507056,
+      "start_ticks": "924943",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 32178,
+      "io_bytes": 1798144,
+      "stalled": false
+    },
+    {
+      "pid": 491068,
+      "start_ticks": "882127",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 74459,
+      "io_bytes": 3252224,
+      "stalled": false
+    }
+  ],
+  "rss_kib": 4640644,
+  "policy": "20 min without Java CPU or disk-I/O activity; diagnose and fail, never restart scientific gates"
+}

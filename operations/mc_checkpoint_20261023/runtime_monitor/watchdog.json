@@ -1,0 +1,32 @@
+{
+  "updated_at": 1792749440.434961,
+  "runtime_pid": 151387,
+  "java_processes": [
+    {
+      "pid": 184774,
+      "start_ticks": "395047",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 181923,
+      "io_bytes": 4620288,
+      "stalled": false
+    },
+    {
+      "pid": 165020,
+      "start_ticks": "340611",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 242375,
+      "io_bytes": 6377472,
+      "stalled": false
+    },
+    {
+      "pid": 169151,
+      "start_ticks": "352038",
+      "seconds_without_activity": 0.0,
+      "cpu_ticks": 229058,
+      "io_bytes": 6045696,
+      "stalled": false
+    }
+  ],
+  "rss_kib": 2898088,
+  "policy": "20 min without Java CPU or disk-I/O activity; diagnose and fail, never restart scientific gates"
+}

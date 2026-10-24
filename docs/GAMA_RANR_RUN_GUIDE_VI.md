@@ -56,3 +56,11 @@ Mỗi lượt hoàn tất có completion.json, configuration.json, manifest.json
 ## Release có lưu trạng thái
 
 Dùng `python -m ranr.gama.release start/status/stop/resume` theo [README_LENH](../README_LENH.md). Mỗi stage ghi log, hash và trạng thái; dừng ở gate lỗi. Calibration lịch sử cần compatibility + replay, không thay source hash. Pipeline có thể thu lại ba seed trên nguồn hiện hành nếu không chứng minh được tái sử dụng. Accuracy trước development/design; performance sau freeze. Ngân sách 72 giờ dành riêng training, cộng qua resume; evaluation dùng 30 seed chưa dùng để chọn model.
+
+## Monte Carlo có checkpoint — 23/10/2026
+
+Benchmark giữ nguyên seed/số mẫu/ngưỡng, lưu riêng từng native probe và seal hash. Xem [vận hành và bằng chứng](../operations/mc_checkpoint_20261023/README_VI.md). Lệnh `python -B operations/mc_checkpoint_20261023/status.py` trong thư mục dự án hiển thị tiến độ từng probe. Cùng release/service được dùng tiếp; không mở worker cạnh tranh.
+
+## Checkpoint theo chỉ số mẫu — 23/10/2026
+
+Bộ chạy mới giữ đủ N mẫu, dùng GAMA ghép/tính thống kê và tái sử dụng các probe hoàn thành đã kiểm chứng. Trạng thái hiện hành: `.venv/bin/python -B operations/mc_chunks_20261023/status.py`. Xem [bằng chứng và vận hành](../operations/mc_chunks_20261023/README_VI.md). Các checkpoint native_shards cũ vẫn được giữ nguyên.

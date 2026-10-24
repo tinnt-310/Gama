@@ -48,3 +48,11 @@ Sau khi có calibration hiện hành và native validation:
 ```
 
 Sau evidence-backed freeze, chạy benchmark `--stage performance` với accuracy_config.json, rồi train bằng locked_config.json và budget.json của cùng benchmark. Giữ 15% dự phòng trong training; nếu ngân sách không đủ thì dừng và báo, không tự giảm protocol. Bốn model phải hoàn tất trước evaluate. Tất cả kiểm chứng dài và kết luận hiệu quả được theo dõi riêng với kiểm thử nhỏ.
+
+## Monte Carlo có checkpoint — 23/10/2026
+
+Benchmark giữ nguyên seed/số mẫu/ngưỡng, lưu riêng từng native probe và seal hash. Xem [vận hành và bằng chứng](operations/mc_checkpoint_20261023/README_VI.md). Lệnh `python -B operations/mc_checkpoint_20261023/status.py` trong thư mục dự án hiển thị tiến độ từng probe. Cùng release/service được dùng tiếp; không mở worker cạnh tranh.
+
+## Checkpoint theo chỉ số mẫu — 23/10/2026
+
+Bộ chạy mới giữ đủ N mẫu, dùng GAMA ghép/tính thống kê và tái sử dụng các probe hoàn thành đã kiểm chứng. Trạng thái hiện hành: `.venv/bin/python -B operations/mc_chunks_20261023/status.py`. Xem [bằng chứng và vận hành](operations/mc_chunks_20261023/README_VI.md). Các checkpoint native_shards cũ vẫn được giữ nguyên.

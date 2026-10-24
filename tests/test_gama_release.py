@@ -234,3 +234,39 @@ class ReleaseContracts(unittest.TestCase):
             read_evidence(proof)
             path.write_text('mean,p95,externality\n0,0,99999\n')
             with self.assertRaisesRegex(ValueError,'Evidence changed'):read_evidence(proof)
+
+    def test_lifecycle_guard_base_marker_accepts_only_its_exact_abort(self):
+        from ranr.gama.evidence import verify_native
+        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_CONFIGURATION_GUARD_PASS']
+        refs=[]
+        for i,marker in enumerate(markers):
+            path=self.root/f'guard_{i}.json'
+            fixture={'source':{'unit':True},'model':'other','marker':marker,'console':marker}
+            if marker=='RANR_CONFIGURATION_GUARD_PASS':
+                fixture.update(model='models/tests/RanrLifecycleTests.gaml',console=marker+' case\nRANR_ERROR: Configuration changed: case; restart required')
+            write_json(path,fixture);refs.append(reference(path))
+        native=self.root/'validation.json'
+        write_json(native,{'passed':True,'source':{'unit':True},'dependencies':refs})
+        with patch('ranr.gama.evidence.provenance',return_value={'unit':True}):
+            verify_native(native)
+            for failure in ['RANR_ERROR: unknown failure','Runtime error: physics failure','RANR_ERROR: Configuration changed: compliance; restart required']:
+                p=self.root/'guard_6.json';record=json.loads(p.read_text())
+                record['console']='RANR_CONFIGURATION_GUARD_PASS case\n'+failure
+                write_json(p,record);refs[-1]=reference(p)
+                write_json(native,{'passed':True,'source':{'unit':True},'dependencies':refs})
+                with self.assertRaises(ValueError):verify_native(native)
+
+    def test_validation_only_transition_rejects_any_simulation_change(self):
+        from ranr.gama.transition import transition_changes
+        for category,name in [('gaml','models/main.gaml'),('orchestrator','src/ranr/gama/headless.py'),('orchestrator','src/ranr/gama/pipeline.py'),('configuration_fixtures','configs/gama/research.json')]:
+            with self.assertRaises(ValueError):transition_changes({category:{name:'old'}},{category:{name:'new'}})
+        name='src/ranr/gama/evidence.py'
+        change=transition_changes({'orchestrator':{name:'old'}},{'orchestrator':{name:'new'}})
+        self.assertEqual(change[name]['old'],'old');self.assertEqual(change[name]['new'],'new')
+
+    def test_native_review_requires_transition_certificate(self):
+        from ranr.gama.evidence import verify_native
+        path=self.root/'native_review.json'
+        write_json(path,{'passed':True,'source':{'unit':True},'execution_source':{'old':True},'dependencies':[{'path':str(self.root/'missing'),'sha256':'invalid'}]})
+        with patch('ranr.gama.evidence.provenance',return_value={'unit':True}):
+            with self.assertRaises((FileNotFoundError,ValueError,KeyError)):verify_native(path)

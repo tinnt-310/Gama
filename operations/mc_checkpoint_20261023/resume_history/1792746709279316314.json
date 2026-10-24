@@ -1,0 +1,63 @@
+{
+  "status": "interrupted",
+  "stages": {
+    "python_tests": {
+      "status": "complete",
+      "started_at": 1792222675.6203897,
+      "active_seconds": 2.3176026470027864,
+      "command": [
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/.venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests"
+      ],
+      "artifacts": [],
+      "finished_at": 1792222678.004282
+    },
+    "native_validation": {
+      "status": "complete",
+      "started_at": 1792222678.5290916,
+      "active_seconds": 1.2158204009756446,
+      "command": [
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/.venv/bin/python",
+        "-B",
+        "-m",
+        "ranr.gama.transition",
+        "--certificate",
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/outputs/gama_ranr/gate_repairs/20261017_marker/evidence/compatibility.json"
+      ],
+      "artifacts": [
+        {
+          "path": "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/outputs/gama_ranr/validation.json",
+          "sha256": "f6ba4f9a7a9bfe5bcbe9049db3a509afd70cc915c9ebb2fb2c9f4a68994e68f6"
+        }
+      ],
+      "finished_at": 1792222679.8153718
+    },
+    "accuracy": {
+      "status": "running",
+      "started_at": 1792743699.4375772,
+      "active_seconds": 245531.697272842,
+      "command": [
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/.venv/bin/python",
+        "-B",
+        "-m",
+        "ranr",
+        "--config",
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/outputs/gama_ranr/releases/1792222674468251400/configs/research.json",
+        "benchmark",
+        "--stage",
+        "accuracy",
+        "--output",
+        "/home/tinnt/Gama_Workspace/Nha Trang CSs planning/outputs/gama_ranr/releases/1792222674468251400/benchmark"
+      ]
+    }
+  },
+  "updated_at": 1792746708.6312776,
+  "current_stage": "accuracy",
+  "calibration_strategy": "reviewed_headless_validation_only_transition",
+  "error": "Signal 15"
+}
