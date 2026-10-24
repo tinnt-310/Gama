@@ -1,0 +1,20 @@
+These native fixtures add evidence without changing the frozen worker's models.
+
+`RanrPhysicalPredictionReview.gaml` compares `ranr_estimate` mean/P95 against a
+real EV's charging wait, and compares predicted externality against two physical
+stations with and without the inserted EV. The controlled result is 10 minutes
+for each quantity. It also exercises all 20 adaptive coefficients and the fixed
+reference row. This is a deterministic counterexample test, not field forecast
+validation or Monte Carlo convergence.
+
+`RanrAdaptiveFeatureReview.gaml` loads the accepted observation-v5 calibration
+from the sibling delivery directory `accepted_data_v5/calibration.json`. It
+checks the native state construction under controlled load, request intensity,
+response uncertainty and information age. Its five designed state vectors have
+rank 5. Learned gains and empirical identifiability remain outside this test.
+
+Both run through `ranr.gama.validation.run_model`, using experiments
+`physical_prediction_review` (46 steps) and `adaptive_feature_review` (one step).
+Delivery evidence records each fixture's SHA-256 explicitly because these
+additional test files are outside the production `models/` provenance glob.
+The original full native suite has not been relabeled as executing this commit.
