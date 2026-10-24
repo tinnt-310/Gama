@@ -130,7 +130,7 @@ global {
                         if resolution["token"]=job["token"] and resolution["status"]="cancelled" { service_until <- min(service_until,max(0.0,float(resolution["at"])-float(snapshot["issued"]))); }
                     }
                 }
-                jobs << ["at"::0.0,"energy"::energy,"max_kw"::job["max_kw"],"service_until"::service_until,"probe"::false];
+                jobs << ["at"::0.0,"energy"::energy,"max_kw"::job["max_kw"],"soc"::("soc" in job.keys ? float(job["soc"]) : 0.0),"service_until"::service_until,"probe"::false];
             }
             float eta <- 0.0;
             if ranr_method!="No-Prediction" {
@@ -142,14 +142,14 @@ global {
             map<string,unknown> probe <- ["at"::eta,"energy"::request["energy"],"max_kw"::request["max_kw"],"service_until"::1e100,"probe"::true];
             list<map<string,unknown>> with_probe <- (jobs+[probe]) sort_by float(each["at"]);
             int probe_index <- with_probe index_of probe;
-            map<string,unknown> inserted <- ranr_shadow_limited(powers,releases,with_probe,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
+            map<string,unknown> inserted <- ranr_shadow_observed(snapshot,releases,with_probe,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
             float waiting <- list<float>(inserted["waits"])[probe_index]; waits << waiting;
             charges << (list<float>(inserted["nominal_services"])[probe_index]>0.0 ? list<float>(inserted["nominal_services"])[probe_index] : 60.0*float(request["energy"])/(charge_efficiency*max(1e-9,min(max(powers),float(request["max_kw"])))));
             workloads << sum(jobs collect float(each["energy"]));
             if ranr_method="No-Prediction" { externalities << 0.0; }
             else {
                 float counter_started <- machine_time;
-                map<string,unknown> baseline <- ranr_shadow_limited(powers,releases,jobs,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
+                map<string,unknown> baseline <- ranr_shadow_observed(snapshot,releases,jobs,"aggregate_kw" in snapshot.keys ? float(snapshot["aggregate_kw"]) : sum(powers));
                 externalities << float(inserted["total"])-waiting-float(baseline["total"]);
                 ranr_externality_ms <- ranr_externality_ms+machine_time-counter_started;
             }

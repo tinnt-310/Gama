@@ -14,12 +14,11 @@ from ..paths import write_json, digest
 from .headless import RunConfig, METHODS, CASES, OUTPUT, provenance, parameter_record, run
 from .contracts import (OBJECTIVE_VERSION, OBJECTIVE_CONFIG_HASH, OBJECTIVE_SPEC,
                         aggregate_fitness, rank_fitness_vectors, validate_paired_results)
+from .training_time import durable_replace, TrainingClock, elapsed_guard
 
 
 def _save(path: Path, value: object) -> None:
-    temporary=path.with_suffix('.tmp')
-    temporary.write_bytes(pickle.dumps(value,pickle.HIGHEST_PROTOCOL))
-    temporary.replace(path)
+    durable_replace(path, pickle.dumps(value,pickle.HIGHEST_PROTOCOL))
 
 
 def validation_improved(candidate, incumbent):
@@ -40,6 +39,8 @@ def _evaluate(config,method,theta,folder,seed,workers,remaining=None):
     design=[(case,seed+i) for i,case in enumerate(CASES)]
     expires=time.monotonic()+remaining if remaining is not None else None
     def execute(item):
+        from .monitoring import check_training_cancelled
+        check_training_cancelled()
         case,episode_seed=item
         target=folder/case
         row=run(replace(config,method=method,case=case,seed=episode_seed),theta,target,
@@ -77,6 +78,8 @@ def train(config:RunConfig,folder:Path,budget_file:Path,*,resume=False,smoke=Fal
         read_reference(specification['accuracy_evidence'])
         read_evidence(specification['accuracy_evidence']['path'])
         if specification['hours']>72 or specification['optimizer_seeds']!=[41001,41002,41003]: raise ValueError('Registered training allowance/seed protocol changed')
+        from .evidence import verify_training_acceptance
+        verify_training_acceptance(OUTPUT/'pre_training_acceptance.json')
     maximum=specification['budget']['max_evaluations']; minimum=specification['budget']['min_evaluations']
     interval=specification['budget']['validation_every']; workers=workers_override or specification['workers']
     if workers<1 or (not smoke and workers>specification['workers']): raise ValueError('Invalid worker count')
@@ -106,94 +109,99 @@ def train(config:RunConfig,folder:Path,budget_file:Path,*,resume=False,smoke=Fal
                         best_vector=None,best_parameters=None,stale=0,done=False))
             state={'registration':identity,'slots':slots,'active_seconds':0.,'status':'running','paired_reference':{}}
             _save(checkpoint,state)
-        started=time.monotonic();previous=state['active_seconds']
         limit=training_limit(specification)
-        def account(): state['active_seconds']=previous+time.monotonic()-started
-        def remaining():
-            account();return limit-state['active_seconds']
-        def save(status=None):
-            account()
-            if status:state['status']=status
-            _save(checkpoint,state)
-            write_json(folder/'registration.json',{**identity,'status':state['status'],'active_seconds':state['active_seconds']})
-        def paired(rows,stage):
-            for row in rows:
-                key=f'{stage}:{row["case"]}:{row["seed"]}'
-                value=[row['exogenous_hash'],row['planned_ev_days']]
-                if key in state['paired_reference'] and state['paired_reference'][key]!=value:
-                    raise ValueError('Cross-method/candidate exogenous pairing mismatch: '+key)
-                state['paired_reference'][key]=value
-        try:
-            save('running')
-            while any(not slot['done'] for slot in state['slots']):
-                for slot in state['slots']:
-                    if slot['done']:continue
-                    if remaining()<=0:save('budget_limited');return {'status':'budget_limited'}
-                    root=folder/slot['method']/str(slot['seed'])
-                    if slot['pending_validation'] is not None:
-                        pending=slot['pending_validation'];theta=pending['parameters']
-                        vector,rows=_evaluate(config,slot['method'],theta,root/'validation'/str(slot['evaluations']),21001,workers,remaining())
-                        paired(rows,'validation')
-                        improved=validation_improved(vector,slot['best_vector'])
-                        slot['stale']=0 if improved else slot['stale']+1
-                        if slot['best_vector'] is None or tuple(vector)<tuple(slot['best_vector']):
-                            slot['best_vector']=vector;slot['best_parameters']=theta
-                        pending['row'].update(validation_fitness_vector=vector,validation_parameters=theta)
-                        slot['history'].append(pending['row']);slot['pending_validation']=None
-                        slot['done']=slot['evaluations']>=maximum or (slot['evaluations']>=minimum and slot['stale']>=3)
-                        write_json(root/'history.json',slot['history']);save();continue
-                    if slot['pending'] is None:
-                        np.random.set_state(slot['rng']);slot['pending']=slot['optimizer'].ask();slot['rng']=np.random.get_state();save()
-                    population=len(slot['pending']);work=[]
-                    expires=time.monotonic()+remaining()
-                    for index,theta in enumerate(slot['pending']):
-                        for case,seed in identity['candidate_design']:
-                            work.append((replace(config,method=slot['method'],case=case,seed=seed),list(theta),root/'candidates'/str(slot['generation'])/str(index)/case))
-                    def execute(job):
-                        setting,theta,target=job
-                        result=run(setting,theta,target,resume=target.exists(),wall_limit=max(.001,expires-time.monotonic()))
-                        return {**result,'case':setting.case,'seed':setting.seed}
-                    with ThreadPoolExecutor(max_workers=workers) as pool: results=list(pool.map(execute,work))
-                    groups=[results[i*len(CASES):(i+1)*len(CASES)] for i in range(population)]
-                    vectors,ranks=generation_fitness(groups,identity['candidate_design'])
-                    for rows in groups:paired(rows,'candidate')
-                    winner=min(range(population),key=lambda i:tuple(vectors[i]));theta=list(slot['pending'][winner])
-                    records=[dict(candidate=i,parameters=list(slot['pending'][i]),fitness_vector=vectors[i],
-                                  generation_rank=ranks[i],operational_objective=vectors[i][4],
-                                  objective_version=OBJECTIVE_VERSION,objective_config_hash=OBJECTIVE_CONFIG_HASH) for i in range(population)]
-                    write_json(root/'generations'/f'{slot["generation"]}.json',records)
-                    np.random.set_state(slot['rng']);slot['optimizer'].tell(slot['pending'],ranks);slot['rng']=np.random.get_state()
-                    slot['pending']=None;slot['evaluations']+=population;slot['generation']+=1
-                    row=dict(evaluations=slot['evaluations'],generation=slot['generation'],fitness_vector=vectors[winner],
-                             operational_objective=vectors[winner][4],generation_rank=0.,rollouts=len(results),
-                             cpu_seconds=sum(r.get('cpu_seconds',0) for r in results))
-                    if slot['evaluations']%interval==0 or slot['evaluations']>=maximum:
-                        slot['pending_validation']={'parameters':theta,'row':row}
-                    else:slot['history'].append(row)
-                    write_json(root/'history.json',slot['history']);save()
-            # Fixed validation vectors, never generation-local ranks, select publication.
-            for method in METHODS:
-                options=[s for s in state['slots'] if s['method']==method and s['best_vector'] is not None]
-                if not options:raise ValueError('No validated candidate')
-                winner=min(options,key=lambda s:tuple(s['best_vector']))
-                result=parameter_record(method,winner['best_parameters'],trained=not smoke,profile=identity['profile'],
-                    source=identity['source'],validation_fitness_vector=winner['best_vector'],
-                    operational_objective=winner['best_vector'][4],optimizer_seed=winner['seed'],
-                    config=asdict(config),calibration_sha256=identity['calibration_sha256'],budget_sha256=identity['budget_sha256'])
-                write_json(folder/method/'parameters.json',result)
-            if not smoke:
+        clock=TrainingClock(folder,identity,state['active_seconds'],limit)
+        with elapsed_guard(clock):
+            def account(): state['active_seconds']=clock.consumed()
+            def remaining():
+                account();return limit-state['active_seconds']
+            def save(status=None):
+                account()
+                if status:state['status']=status
+                _save(checkpoint,state)
+                write_json(folder/'registration.json',{**identity,'status':state['status'],'active_seconds':state['active_seconds']})
+            def paired(rows,stage):
+                for row in rows:
+                    key=f'{stage}:{row["case"]}:{row["seed"]}'
+                    value=[row['exogenous_hash'],row['planned_ev_days']]
+                    if key in state['paired_reference'] and state['paired_reference'][key]!=value:
+                        raise ValueError('Cross-method/candidate exogenous pairing mismatch: '+key)
+                    state['paired_reference'][key]=value
+            try:
+                save('running')
+                while any(not slot['done'] for slot in state['slots']):
+                    for slot in state['slots']:
+                        if slot['done']:continue
+                        from .monitoring import check_training_cancelled
+                        check_training_cancelled()
+                        if remaining()<=0:save('budget_limited');return {'status':'budget_limited'}
+                        root=folder/slot['method']/str(slot['seed'])
+                        if slot['pending_validation'] is not None:
+                            pending=slot['pending_validation'];theta=pending['parameters']
+                            vector,rows=_evaluate(config,slot['method'],theta,root/'validation'/str(slot['evaluations']),21001,workers,remaining())
+                            paired(rows,'validation')
+                            improved=validation_improved(vector,slot['best_vector'])
+                            slot['stale']=0 if improved else slot['stale']+1
+                            if slot['best_vector'] is None or tuple(vector)<tuple(slot['best_vector']):
+                                slot['best_vector']=vector;slot['best_parameters']=theta
+                            pending['row'].update(validation_fitness_vector=vector,validation_parameters=theta)
+                            slot['history'].append(pending['row']);slot['pending_validation']=None
+                            slot['done']=slot['evaluations']>=maximum or (slot['evaluations']>=minimum and slot['stale']>=3)
+                            write_json(root/'history.json',slot['history']);save();continue
+                        if slot['pending'] is None:
+                            np.random.set_state(slot['rng']);slot['pending']=slot['optimizer'].ask();slot['rng']=np.random.get_state();save()
+                        population=len(slot['pending']);work=[]
+                        expires=time.monotonic()+remaining()
+                        for index,theta in enumerate(slot['pending']):
+                            for case,seed in identity['candidate_design']:
+                                work.append((replace(config,method=slot['method'],case=case,seed=seed),list(theta),root/'candidates'/str(slot['generation'])/str(index)/case))
+                        def execute(job):
+                            from .monitoring import check_training_cancelled
+                            check_training_cancelled()
+                            setting,theta,target=job
+                            result=run(setting,theta,target,resume=target.exists(),wall_limit=max(.001,expires-time.monotonic()))
+                            return {**result,'case':setting.case,'seed':setting.seed}
+                        with ThreadPoolExecutor(max_workers=workers) as pool: results=list(pool.map(execute,work))
+                        groups=[results[i*len(CASES):(i+1)*len(CASES)] for i in range(population)]
+                        vectors,ranks=generation_fitness(groups,identity['candidate_design'])
+                        for rows in groups:paired(rows,'candidate')
+                        winner=min(range(population),key=lambda i:tuple(vectors[i]));theta=list(slot['pending'][winner])
+                        records=[dict(candidate=i,parameters=list(slot['pending'][i]),fitness_vector=vectors[i],
+                                      generation_rank=ranks[i],operational_objective=vectors[i][4],
+                                      objective_version=OBJECTIVE_VERSION,objective_config_hash=OBJECTIVE_CONFIG_HASH) for i in range(population)]
+                        write_json(root/'generations'/f'{slot["generation"]}.json',records)
+                        np.random.set_state(slot['rng']);slot['optimizer'].tell(slot['pending'],ranks);slot['rng']=np.random.get_state()
+                        slot['pending']=None;slot['evaluations']+=population;slot['generation']+=1
+                        row=dict(evaluations=slot['evaluations'],generation=slot['generation'],fitness_vector=vectors[winner],
+                                 operational_objective=vectors[winner][4],generation_rank=0.,rollouts=len(results),
+                                 cpu_seconds=sum(r.get('cpu_seconds',0) for r in results))
+                        if slot['evaluations']%interval==0 or slot['evaluations']>=maximum:
+                            slot['pending_validation']={'parameters':theta,'row':row}
+                        else:slot['history'].append(row)
+                        write_json(root/'history.json',slot['history']);save()
+                # Fixed validation vectors, never generation-local ranks, select publication.
                 for method in METHODS:
-                    target=OUTPUT/'models'/method;target.mkdir(parents=True,exist_ok=True)
-                    if (target/'parameters.json').exists():shutil.copy2(target/'parameters.json',target/f'parameters_{time.time_ns()}.json')
-                    shutil.copy2(folder/method/'parameters.json',target/'parameters.json')
-            save('complete');return {'status':'complete','active_seconds':state['active_seconds']}
-        except BaseException as error:
-            if isinstance(error, TimeoutError) and remaining() <= 0:
-                save('budget_limited')
-                return {'status':'budget_limited','active_seconds':state['active_seconds']}
-            state['error']=str(error);save('invalid_evaluation' if isinstance(error,ValueError) else 'interrupted')
-            write_json(folder/'diagnostic.json',{'error':str(error),'objective_version':OBJECTIVE_VERSION,'objective_config_hash':OBJECTIVE_CONFIG_HASH})
-            raise
+                    options=[s for s in state['slots'] if s['method']==method and s['best_vector'] is not None]
+                    if not options:raise ValueError('No validated candidate')
+                    winner=min(options,key=lambda s:tuple(s['best_vector']))
+                    result=parameter_record(method,winner['best_parameters'],trained=not smoke,profile=identity['profile'],
+                        source=identity['source'],validation_fitness_vector=winner['best_vector'],
+                        operational_objective=winner['best_vector'][4],optimizer_seed=winner['seed'],
+                        config=asdict(config),calibration_sha256=identity['calibration_sha256'],budget_sha256=identity['budget_sha256'])
+                    write_json(folder/method/'parameters.json',result)
+                if not smoke:
+                    for method in METHODS:
+                        target=OUTPUT/'models'/method;target.mkdir(parents=True,exist_ok=True)
+                        if (target/'parameters.json').exists():shutil.copy2(target/'parameters.json',target/f'parameters_{time.time_ns()}.json')
+                        shutil.copy2(folder/method/'parameters.json',target/'parameters.json')
+                save('complete');return {'status':'complete','active_seconds':state['active_seconds']}
+            except BaseException as error:
+                if isinstance(error, TimeoutError) and remaining() <= 0:
+                    save('budget_limited')
+                    return {'status':'budget_limited','active_seconds':state['active_seconds']}
+                state['error']=str(error);save('invalid_evaluation' if isinstance(error,ValueError) else 'interrupted')
+                write_json(folder/'diagnostic.json',{'error':str(error),'objective_version':OBJECTIVE_VERSION,'objective_config_hash':OBJECTIVE_CONFIG_HASH})
+                raise
 
 
 def training_limit(specification):

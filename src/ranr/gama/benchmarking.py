@@ -121,7 +121,9 @@ def physical_comparison(result, ref):
 
 
 def physical_accuracy(config, folder):
-    probe = replace(config, development=True, warmup_minutes=10, measure_minutes=180, trace=False)
+    # The default midnight clock ends Measurement before daily departures.
+    # Observe the real morning schedule; retain fleet, SOC and physical behavior.
+    probe = replace(config, development=True, initial_hour=6.0, warmup_minutes=10, measure_minutes=180, trace=False)
     refs, physical = {}, {}
     for method in METHODS:
         target = folder / "physical_reference" / method

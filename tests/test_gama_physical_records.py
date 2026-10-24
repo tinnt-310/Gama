@@ -19,6 +19,7 @@ class PhysicalRecords(unittest.TestCase):
         self.save('vehicle_traits.json', [dict(id=10000,kind='private',initial_soc=40.,soc_request_threshold=30.,soc_preferred_target=80.,battery_capacity_kwh=60.)])
         self.save('station_inventory.json', [dict(sid=sid,ports={str(i):60. for i in range(15 if sid==0 else 11)}) for sid in range(11)])
         self.save('request_attempts.json', [])
+        self.save('outcomes.json', [])
         self.save('charging_intents.json', [])
         self.save('traffic_plan.json', [])
         self.save('stranded_ev_ids.json', [])
@@ -62,8 +63,10 @@ class PhysicalRecords(unittest.TestCase):
             validate_physical_records(self.folder,self.config)
 
     def test_duplicate_port_allocation_is_rejected(self):
-        self.save('request_attempts.json',[dict(request_id='a',vehicle_id=10000),dict(request_id='b',vehicle_id=10000)])
+        self.save('request_attempts.json',[dict(request_id='a',vehicle_id=10000,at=0.),dict(request_id='b',vehicle_id=10000,at=0.)])
         with (self.folder/'events.csv').open('a') as stream:
+            stream.write('a,arrival,0,0,0,0,60,120,40,80\n')
+            stream.write('b,arrival,0,0,0,0,60,120,40,80\n')
             stream.write('a,service_started,0,0,0,0,60,120,40,80\n')
             stream.write('b,service_started,0,0,0,0,60,120,40,80\n')
         with self.assertRaisesRegex(ValueError,'port allocation'):

@@ -23,7 +23,7 @@
   "consumption_kwh_km": 0.18,
   "charge_efficiency": 0.9,
   "battery_capacity_kwh": 60.0,
-  "observation_version": "station-observation-4",
+  "observation_version": "station-observation-5",
   "objective_version": "intent-service-5",
   "safety_soc_reserve": 5.0,
   "connector_assumption": "generic-public; provisional universal compatibility, not surveyed",

@@ -209,6 +209,7 @@ species charging_station parent:ranr_station_agent {
     action ranr_capture(float at) {
         do ranr_index_ports;
         list<float> powers <- []; list<float> lower <- []; list<float> upper <- [];
+        list<map<string,unknown>> busy <- [];
         list<int> occupied <- charging_vehicles collect each.ranr_port_id;
         loop id over:ranr_port_catalog.keys {
             if id in occupied { continue; }
@@ -217,6 +218,7 @@ species charging_station parent:ranr_station_agent {
         loop ev over: charging_vehicles {
             powers << (ranr_operational and !(ev.ranr_port_id in ranr_failed_ports) ? float(ev.charge_port_rate)*ranr_capacity_factor : 0.0);
             float remaining <- max(0.0,ev.requested_energy-ev.delivered_energy);
+            busy << ["port"::(length(powers)-1),"physical_port"::ev.ranr_port_id,"at"::0.0,"energy"::remaining,"max_kw"::ev.ranr_max_kw,"soc"::ev.battery_level,"token"::ev.ranr_token,"service_until"::1e100];
             float live_power <- ranr_operational and !(ev.ranr_port_id in ranr_failed_ports) ? min(float(ev.charge_port_rate)*ranr_capacity_factor,ev.ranr_max_kw) : 0.0;
             float release <- live_power>0.0 ? (step/60.0)*ceil((60.0*remaining/(charge_efficiency*live_power))/(step/60.0)-1e-10) : 1e100;
             float lo <- ranr_snapshot_width>0.0 ? ranr_snapshot_width*floor(release/ranr_snapshot_width) : release;
@@ -228,9 +230,10 @@ species charging_station parent:ranr_station_agent {
             float energy <- max(0.0,ev.requested_energy-ev.delivered_energy);
             float lo <- ranr_energy_width>0.0 ? ranr_energy_width*floor(energy/ranr_energy_width) : energy;
             if ranr_calibrating and at>=ranr_warmup and ranr_energy_width>0.0 { ranr_energy_observed_fractions << (energy-lo)/ranr_energy_width; }
-            queue << ["low"::energy,"high"::energy,"max_kw"::ev.ranr_max_kw,"token"::ev.ranr_token,"service_until"::1e100];
+            queue << ["low"::energy,"high"::energy,"max_kw"::ev.ranr_max_kw,"soc"::ev.battery_level,"token"::ev.ranr_token,"service_until"::1e100];
         }
         ranr_local_snapshot <- ["sid"::ranr_sid,"issued"::at,"powers"::powers,"release_lo"::lower,"release_hi"::upper,"queue"::queue,"aggregate_kw"::ranr_aggregate_limit(),"source"::"local","operational"::ranr_operational,"connectors"::copy(ranr_connectors),"anonymous_count"::length(ranr_anonymous_arrivals where (each>max(0.0,at-5.0) and each<=at)),"anonymous_window"::max(0.0,at-5.0)];
+        ranr_local_snapshot["busy"] <- busy;
     }
     list<float> ranr_physical_powers {
         list<float> powers <- [];

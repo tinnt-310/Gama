@@ -298,6 +298,8 @@ def load_model(path: Path, method: str, config: RunConfig) -> list[float]:
 def _launch(
     arguments: list[str], log: Path, timeout: float, environment: dict[str, str]
 ) -> None:
+    from .monitoring import check_training_cancelled
+    check_training_cancelled()
     with log.open("w") as stream:
         process = subprocess.Popen(
             [
@@ -317,6 +319,11 @@ def _launch(
             start_new_session=True,
         )
         try:
+            from .training_time import owner_token
+            ownership = log.parent / 'owned_processes.json'
+            owners = json.loads(ownership.read_text()) if ownership.exists() else []
+            owners.append(owner_token(process.pid))
+            write_json(ownership, owners)
             from .monitoring import wait_for_gama
 
             code = wait_for_gama(process, log, timeout, environment)
@@ -419,6 +426,19 @@ def run(
             return checked_result(folder, inputs)
         if any(previous.get(k) != v for k, v in inputs.items()):
             raise ValueError("Incomplete run inputs changed")
+        ownership = folder / 'owned_processes.json'
+        if ownership.exists():
+            from .training_time import still_alive, owner_token
+            from .monitoring import process_group
+            for owner in json.loads(ownership.read_text()):
+                if still_alive(owner):
+                    raise ValueError('Incomplete run still has a live owned process; refusing duplicate work')
+                try:
+                    reused = owner_token(owner['pid']) != owner
+                except OSError:
+                    reused = False
+                if not reused and process_group(owner['pid']):
+                    raise ValueError('Incomplete run has surviving process-group members; stop/reconcile before resume')
         archive = folder.parent / "_incomplete" / f"{folder.name}_{time.time_ns()}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         folder.rename(archive)

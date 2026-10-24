@@ -42,5 +42,5 @@
   "environment_version": "persistent-soc-activity-6",
   "objective_version": "intent-service-5",
   "objective_config_hash": "0b32b80393e5e0304be5fc512f2ae6f36208ab0817954c697fb804ffd5f0fea8",
-  "observation_version": "station-observation-4"
+  "observation_version": "station-observation-5"
 }

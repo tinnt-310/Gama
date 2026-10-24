@@ -68,6 +68,23 @@ def jobs(
     return result
 
 
+def arrival_context(context):
+    """Preserve candidate-specific battery energy in kWh, indexed by station sid."""
+    numeric = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    travel = context.get('travel', [])
+    energy = context.get('energy_by_station', [])
+    if (len(travel) != 11 or len(energy) != 11
+        or any(not numeric(x) or x < -1 for x in travel)
+        or any(not numeric(x) or x < 0 for x in energy)
+        or type(context.get('issuer')) is not int or not 0 <= context['issuer'] < 11
+        or type(context.get('chosen')) is not int or not -1 <= context['chosen'] < 11
+        or not numeric(context.get('energy')) or context['energy'] <= 0
+        or not numeric(context.get('max_kw')) or context['max_kw'] <= 0):
+        raise ValueError('Invalid calibration request context or energy_by_station (11 sid-indexed kWh values required)')
+    return {k: context.get(k, 'default' if k == 'context' else None)
+            for k in ('issuer', 'travel', 'energy', 'energy_by_station', 'max_kw', 'context')}
+
+
 def collect_calibration(folders: list[Path], target: Path, compatibility: Path | None = None) -> dict:
     from .evidence import validate_collection
     seen_runs = set()
@@ -115,6 +132,17 @@ def collect_calibration(folders: list[Path], target: Path, compatibility: Path |
             powers = snapshot.get("powers", [])
             lo = snapshot.get("release_lo", [])
             hi = snapshot.get("release_hi", [])
+            if not isinstance(snapshot.get('busy'), list):
+                raise ValueError('Observation v5 requires busy-job state; recollect legacy snapshots')
+            occupied = set()
+            for job in snapshot['busy']:
+                port = job.get('port')
+                if (type(port) is not int or not 0 <= port < len(powers) or port in occupied
+                    or type(job.get('physical_port')) is not int or job['physical_port'] < 0
+                    or any(type(job.get(k)) not in (int, float) or not math.isfinite(job[k]) for k in ('energy', 'max_kw', 'soc'))
+                    or job['energy'] < 0 or job['max_kw'] <= 0 or not 0 <= job['soc'] <= 100):
+                    raise ValueError('Invalid calibration busy-job port/energy/cap/SOC')
+                occupied.add(port)
             if (
                 not 0 <= snapshot["sid"] < 11
                 or not powers
@@ -128,6 +156,7 @@ def collect_calibration(folders: list[Path], target: Path, compatibility: Path |
             ):
                 raise ValueError("Invalid calibration snapshot values")
         for context in contexts[previous_contexts:]:
+            arrival_context(context)
             token=(str(folder),context.get("token",context.get("request_id")))
             if token in context_tokens:raise ValueError("Duplicate calibration context")
             context_tokens.add(token)
@@ -215,7 +244,7 @@ def collect_calibration(folders: list[Path], target: Path, compatibility: Path |
         "schema": "gama-calibration-v4",
         "objective_version": "intent-service-5",
         "objective_config_hash": OBJECTIVE_CONFIG_HASH,
-        "observation_version": "station-observation-4",
+        "observation_version": "station-observation-5",
         "response_prior": response_prior,
         "response_identification": "P(observed destination class | offer, category), not latent compliance; Dirichlet(1,1,1)",
         "environment_version": ENVIRONMENT_VERSION,
@@ -229,10 +258,9 @@ def collect_calibration(folders: list[Path], target: Path, compatibility: Path |
         "energy_fractions": energy,
         "energy_samples": [x["energy"] for x in contexts],
         "prior_snapshots": priors,
-        "arrival_prior": [
-            {k: c.get(k, "default" if k == "context" else None) for k in ["issuer", "travel", "energy", "max_kw", "context"]}
-            for c in contexts
-        ],
+        "arrival_prior": [arrival_context(c) for c in contexts],
+        "arrival_energy_unit": "battery_kWh",
+        "arrival_station_order": list(range(11)),
         "eta_factors": eta_factors,
         "eta_population": "all observed arrival legs, independent of charging completion",
         "arrival_probability": (observed_arrivals+1)/(arrival_trials+2),

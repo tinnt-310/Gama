@@ -84,7 +84,7 @@ Phép kiểm chứng Python độc lập đối chiếu identity, need–intent�
 
 Collect cũ được người dùng xác nhận đã Stop trước khi chỉnh sửa. Không đóng ứng dụng GAMA. Snapshot trước sửa và mọi CSV vật lý cũ được giữ nguyên. Danh mục `historical_outputs.json` ghi các run cũ; `incompatible_artifacts.json` ghi calibration, validation và model/checkpoint không còn được dùng. Metadata dùng `HISTORICAL_ONLY` và `NOT_VALID_FOR_NEW_TRAINING`; không chuyển đổi fitness cũ sang định nghĩa mới.
 
-Objective `intent-service-5`, lifecycle/outcome schema 5, environment `persistent-soc-activity-6`, observation `station-observation-4`. Loader/cache/checkpoint/model/calibration kiểm tra phiên bản và hash đặc tả; provenance còn khóa mã nguồn và cấu hình. Hash JSON chuẩn hóa của đặc tả:
+Objective `intent-service-5`, lifecycle/outcome schema 5, environment `persistent-soc-activity-6`, observation `station-observation-5`. Loader/cache/checkpoint/model/calibration kiểm tra phiên bản và hash đặc tả; provenance còn khóa mã nguồn và cấu hình. Hash JSON chuẩn hóa của đặc tả:
 
 ```
 0b32b80393e5e0304be5fc512f2ae6f36208ab0817954c697fb804ffd5f0fea8

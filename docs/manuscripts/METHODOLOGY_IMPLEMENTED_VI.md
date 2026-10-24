@@ -1,5 +1,7 @@
 # Mô tả methodology đã triển khai
 
+Observation hiện hành `station-observation-5`; xem [chỉ mục canonical](../CANONICAL_INDEX_VI.md). Busy snapshot giữ energy/cap/SOC/port; chưa có kết quả training hoặc held-out cho version này.
+
 Đây là phần bổ sung triển khai, không phải kết quả hiệu quả thực nghiệm và không thay thế PDF lịch sử.
 
 Hệ thống `persistent-soc-activity-6` dùng GAMA native driving với GIS Nha Trang và11 trạm125 cổng7195kW danh định. Fleet3000 conventional/1000 privateEV/700 taxi tồn tại độc lập nhu cầu sạc. Mỗi EV có ngưỡng pin/mục tiêu riêng, lịch cá nhân hoặc ca taxi. Nhu cầu phát sinh từ SOC, route năng lượng của chuyến đã biết và hoạt động; không có scheduler cơ hội sạc/ngày. Inbound tối đa30% từng loại vào dần qua gates có tuyến kiểm chứng.

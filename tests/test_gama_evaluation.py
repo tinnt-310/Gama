@@ -27,9 +27,10 @@ class EvaluationLedger(unittest.TestCase):
 
     def test_retry_does_not_duplicate_energy(self):
         rows=ledger_fixture();i,a,o,f=rows
-        a[0]['request_id']=a[0]['attempt_id']='r0';o[0].update(request_id='r0',attempt_id='r0',status='voluntary_deferred',delivered_kwh=0.)
+        a[0]['request_id']=a[0]['attempt_id']='r0';o[0].update(request_id='r0',attempt_id='r0',status='voluntary_deferred',delivered_kwh=0.,finished_min=5.,travel_min=0.,waiting_min=0.,charging_min=0.,service_time_min=0.)
         a.append(dict(a[0],request_id='r1',attempt_id='r1',key=2,at=6.,attempt=2))
-        o.append(dict(o[0],request_id='r1',attempt_id='r1',key=2,status='completed',delivered_kwh=10.))
+        o.append(dict(o[0],request_id='r1',attempt_id='r1',key=2,status='completed',delivered_kwh=10.,issued_min=6.,finished_min=23.,travel_min=3.,waiting_min=4.,charging_min=10.,service_time_min=17.))
+        f[0].update(finished_min=23.,actual_completion_time=23.,completion_time_min=18.,retry_delay_min=1.)
         i[0]['attempts']=2;f[0]['attempt_ids']=['r0','r1']
         self.assertTrue(validate_charging_ledger(*rows));self.assertEqual(f[0]['requested_kwh'],10.)
         f[0]['requested_kwh']=20.
@@ -66,7 +67,7 @@ class EvaluationLedger(unittest.TestCase):
 
     def test_underreported_initial_target_energy_is_invalid(self):
         rows=ledger_fixture();rows[3][0]['target_soc']=90.
-        with self.assertRaisesRegex(ValueError,'underreported'):validate_charging_ledger(*rows)
+        with self.assertRaisesRegex(ValueError,'Immutable|underreported'):validate_charging_ledger(*rows)
 
     def test_negative_or_overlapping_time_is_invalid(self):
         rows=ledger_fixture();rows[3][0]['deferred_min']=1

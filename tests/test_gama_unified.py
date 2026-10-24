@@ -301,6 +301,7 @@ class GuiCollection(unittest.TestCase):
                                     "release_lo": [0.0],
                                     "release_hi": [0.0],
                                     "queue": [],
+                                    "busy": [],
                                 }
                             )
                         }
@@ -317,6 +318,7 @@ class GuiCollection(unittest.TestCase):
                                 "chosen": 0,
                                 "travel": [5.0] * 11,
                                 "energy": 20.0,
+                                "energy_by_station": [20.0 + sid for sid in range(11)],
                                 "max_kw": 60.0,
                                 "participating": True,
                             }

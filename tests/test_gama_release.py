@@ -206,7 +206,7 @@ class ReleaseContracts(unittest.TestCase):
 
     def test_native_evidence_allows_only_expected_negative_fixture_abort(self):
         from ranr.gama.evidence import verify_native
-        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_STARTUP_FAILURE_PASS']
+        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_STARTUP_FAILURE_PASS','RANR_BUSY_STATE_PASS']
         references=[]
         for i,marker in enumerate(markers):
             console=marker
@@ -221,10 +221,10 @@ class ReleaseContracts(unittest.TestCase):
             verify_native(native)
             path=self.root/'fixture_6.json'
             record=json.loads(path.read_text());record['console']+='\nRuntime error: unexpected physical failure';write_json(path,record)
-            references[-1]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
+            references[6]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
             with self.assertRaisesRegex(ValueError,'Invalid native'):verify_native(native)
             record['console']='RANR_STARTUP_FAILURE_PASS\nRANR_ERROR: failure';record['model']='another-model';write_json(path,record)
-            references[-1]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
+            references[6]=reference(path);write_json(native,{'passed':True,'source':{'unit':True},'dependencies':references})
             with self.assertRaises(ValueError):verify_native(native)
 
     def test_csv_evidence_hash_is_verified_without_json_decoding(self):
@@ -237,7 +237,7 @@ class ReleaseContracts(unittest.TestCase):
 
     def test_lifecycle_guard_base_marker_accepts_only_its_exact_abort(self):
         from ranr.gama.evidence import verify_native
-        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_CONFIGURATION_GUARD_PASS']
+        markers=['RANR_OBJECTIVE_PASS','RANR_PHYSICAL_PASS','RANR_DECISION_PASS','RANR_PROTOCOL_PASS','RANR_PORT_CAPACITY_PASS','RANR_LAST_DAY_PASS','RANR_CONFIGURATION_GUARD_PASS','RANR_BUSY_STATE_PASS']
         refs=[]
         for i,marker in enumerate(markers):
             path=self.root/f'guard_{i}.json'

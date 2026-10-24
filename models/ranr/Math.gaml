@@ -33,7 +33,7 @@ global {
     float ranr_deadline <- 360.0;
     float ranr_horizon <- 120.0;
     float ranr_ttl <- 180.0;
-    string ranr_observation_version <- "station-observation-4";
+    string ranr_observation_version <- "station-observation-5";
     string ranr_objective_version <- "intent-service-5";
     float ranr_temperature <- float(ranr_environment["temperature"]);
     float ranr_safety_soc <- float(ranr_environment["safety_soc_reserve"]);
@@ -187,6 +187,11 @@ global {
         list<map<string,unknown>> source <- input["queue"];
         loop job over: source { queue << ranr_record(job); }
         result["queue"] <- queue;
+        if "busy" in input.keys {
+            list<map<string,unknown>> busy <- [];
+            loop job over:list<map<string,unknown>>(input["busy"]) { busy << ranr_record(job); }
+            result["busy"] <- busy;
+        }
         return result;
     }
     map<string,unknown> ranr_clone_packet(map<string,unknown> input) {
@@ -428,6 +433,22 @@ global {
         ranr_queue_calls <- ranr_queue_calls+1;
         return ranr_record(["starts"::starts,"finishes"::finishes,"delivered"::received,"remaining"::remaining,"services"::services,"waits"::waits,"nominal_services"::services,
             "total"::sum(waits),"cleared"::empty(remaining where (each>1e-9)),"duration"::clock,"iterations"::iterations]);
+    }
+    map<string,unknown> ranr_shadow_observed(map<string,unknown> snapshot,list<float> releases,list<map<string,unknown>> jobs,float aggregate_kw) {
+        // Legacy release-only fixtures retain their explicit approximation. Native
+        // observation v5 captures busy battery energy, EV cap, SOC and port index.
+        if !("busy" in snapshot.keys) { return ranr_shadow_limited(list<float>(snapshot["powers"]),releases,jobs,aggregate_kw); }
+        list<map<string,unknown>> backlog <- [];
+        loop job over:list<map<string,unknown>>(snapshot["busy"]) { backlog << ranr_record(job); }
+        int offset <- length(backlog); backlog <- backlog+jobs;
+        map<string,unknown> result <- ranr_service_schedule(list<float>(snapshot["powers"]),backlog,aggregate_kw,1e6);
+        loop field_name over:["starts","finishes","delivered","remaining","services","waits","nominal_services"] {
+            list<float> values <- result[field_name]; list<float> retained <- [];
+            if offset<length(values) { loop j from:offset to:length(values)-1 { retained << values[j]; } }
+            result[field_name] <- retained;
+        }
+        result["total"] <- sum(list<float>(result["waits"]));
+        return result;
     }
     map<string,unknown> ranr_shadow_limited(list<float> powers,list<float> releases,list<map<string,unknown>> jobs,float aggregate_kw) {
         list<map<string,unknown>> backlog <- [];

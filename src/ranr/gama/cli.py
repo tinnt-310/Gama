@@ -216,6 +216,9 @@ def main() -> None:
             {"ranr_output": ("STRING", str(OUTPUT / "validation_runs" / f"{time.time_ns()}_charging_episode"))},
         )
         run_model("models/tests/RanrPortCapacityTests.gaml", "ranr_port_capacity", 61, "RANR_PORT_CAPACITY_PASS")
+        for mode in ('sharing', 'caps', 'taper', 'outage', 'heterogeneous'):
+            run_model('models/tests/RanrBusyStateTests.gaml', 'ranr_busy_state', 201, 'RANR_BUSY_STATE_PASS',
+                      {'fixture_mode': ('STRING', mode)})
         if provenance() != frozen:
             raise ValueError("GAMA source changed during validation; rerun validation")
         write_json(

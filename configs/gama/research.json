@@ -27,7 +27,7 @@
   "rush_enabled": true,
   "rush_extra_percent": 30.0,
   "objective_version": "intent-service-5",
-  "observation_version": "station-observation-4",
+  "observation_version": "station-observation-5",
   "temperature": 0.2,
   "p2p_interval": 5.0,
   "min_send_seconds": 10.0,

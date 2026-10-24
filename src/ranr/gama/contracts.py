@@ -10,7 +10,7 @@ from ..paths import ROOT
 TERMINAL = frozenset({"completed", "no_feasible_station", "voluntary_deferred", "declined", "abandoned", "deadline_missed", "stranded", "unresolved"})
 INTENT_TERMINAL = frozenset({"completed", "failed", "unresolved"})
 OBJECTIVE_VERSION = "intent-service-5"
-OBSERVATION_VERSION = "station-observation-4"
+OBSERVATION_VERSION = "station-observation-5"
 OBJECTIVE_SPEC = json.loads((ROOT / "configs/gama/objective.json").read_text())
 OBJECTIVE_CONFIG_HASH = hashlib.sha256(json.dumps(OBJECTIVE_SPEC, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 TIME_FIELDS = ("travel_min", "waiting_min", "charging_min", "deferred_min", "retry_delay_min", "other_elapsed_min")
@@ -72,6 +72,8 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
             raise ValueError("Incomplete energy labeled completed")
         if not finite_tree(result) or result["finished_min"] < attempt["at"] - time_tol:
             raise ValueError("Invalid attempt timestamp")
+        if abs(result['issued_min'] - attempt['at']) > time_tol:
+            raise ValueError('Attempt outcome issuance time mismatch')
         if result["delivered_kwh"] < 0 or result["delivered_kwh"] > result["requested_kwh"] + energy_tol:
             raise ValueError("Invalid attempt energy")
         groups[identity].append(attempt)
@@ -86,6 +88,26 @@ def validate_charging_ledger(intents, attempts, outcomes, resolutions):
         if intent["cause"] == "low_soc" and intent["soc_at_need"] > intent["threshold"] + 1e-6:
             raise ValueError("Low-SOC intent above threshold")
         group = sorted(groups[identity], key=lambda x: x["attempt"])
+        for field in ('target_soc', 'soc_at_need', 'threshold'):
+            if abs(row[field] - intent[field]) > OBJECTIVE_SPEC['soc_tol_percent']:
+                raise ValueError('Immutable intent field mismatch: ' + field)
+        # Physical intent records carry these fields; older synthetic fixtures may not.
+        for field in ('initial_required_kwh', 'battery_capacity_kwh', 'initial_battery_kwh'):
+            if field in intent and abs(row[field] - intent[field]) > energy_tol:
+                raise ValueError('Immutable intent energy mismatch: ' + field)
+        children = [results[r['request_id']] for r in group]
+        if any(child['finished_min'] > row['finished_min'] + time_tol for child in children):
+            raise ValueError('Attempt finishes after intent')
+        if any(results[a['request_id']]['finished_min'] > b['at'] + time_tol for a, b in zip(group, group[1:])):
+            raise ValueError('Overlapping recommendation attempts')
+        if abs(sum(child['delivered_kwh'] for child in children) - row['delivered_kwh']) > energy_tol:
+            raise ValueError('Attempt delivered energy differs from intent total')
+        for field in ('travel_min', 'waiting_min', 'charging_min'):
+            if abs(sum(child[field] for child in children) - row[field]) > time_tol:
+                raise ValueError('Attempt duration differs from intent total: ' + field)
+        if row['status'] == 'completed' and (not children or children[-1]['status'] != 'completed'
+                or abs(children[-1]['finished_min'] - row['finished_min']) > time_tol):
+            raise ValueError('Intent completion differs from final attempt')
         if [r["attempt"] for r in group] != list(range(1, len(group)+1)) or intent["attempts"] != len(group):
             raise ValueError("Missing or repeated recommendation attempt")
         if any(b["at"] <= a["at"] for a,b in zip(group,group[1:])):
@@ -321,11 +343,13 @@ def validate_physical_records(folder, config):
     if len(inventory) != 11 or len(ports) != 125:
         raise ValueError("Charging station/port inventory differs")
     attempts = {row["request_id"]: row for row in records("request_attempts.json")}
+    outcomes = {row['request_id']: row for row in records('outcomes.json')}
     active_ports, active_requests = {}, {}
     terminal_energy = defaultdict(float)
     terminal_ids = set()
     service_starts = 0
     event_keys=set()
+    arrived = set()
     with (folder / "events.csv").open() as stream:
         for row in csv.DictReader(stream):
             identity = row["request_id"]
@@ -336,7 +360,15 @@ def validate_physical_records(folder, config):
             if key in event_keys:
                 raise ValueError("Duplicate attempt event")
             event_keys.add(key)
+            at = float(row['time_min'])
+            if not math.isfinite(at) or at < attempts[identity]['at'] - OBJECTIVE_SPEC['time_tol_min']:
+                raise ValueError('Event precedes its physical request')
+            leg = (identity, row.get('token', ''), row.get('leg', ''))
+            if event == 'arrival':
+                arrived.add(leg)
             if event == "service_started":
+                if leg not in arrived:
+                    raise ValueError('Charging service started before arrival')
                 port = (int(row["station_sid"]), int(row["port_id"]))
                 if port not in ports or port in active_ports or identity in active_requests:
                     raise ValueError("Duplicate or invalid physical port allocation")
@@ -350,6 +382,12 @@ def validate_physical_records(folder, config):
                     raise ValueError("Duplicate terminal session event")
                 terminal_ids.add(identity)
                 energy = float(row["energy_kwh"])
+                outcome = outcomes[identity]
+                if (not math.isfinite(energy) or energy < 0
+                    or abs(energy - outcome['delivered_kwh']) > OBJECTIVE_SPEC['energy_abs_tol_kwh']
+                    or abs(at - outcome['finished_min']) > OBJECTIVE_SPEC['time_tol_min']
+                    or outcome['status'] != ('completed' if event == 'service_completed' else event)):
+                    raise ValueError('Physical terminal event differs from attempt outcome')
                 if identity in active_requests:
                     port, started, maximum = active_requests.pop(identity)
                     active_ports.pop(port)

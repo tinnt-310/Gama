@@ -93,7 +93,7 @@ def run_model(model, experiment, steps, marker=None, parameters=None, seed=42, r
         if resource_output:
             resource_output = Path(resource_output)
             resource_output.parent.mkdir(parents=True,exist_ok=True)
-            resource_output.write_text(json.dumps({"model":model,"experiment":experiment,"steps":steps,"marker":marker,"resources":resources},indent=2))
+            resource_output.write_text(json.dumps({"model":model,"experiment":experiment,"steps":steps,"marker":marker,"parameters":parameters,"seed":seed,"resources":resources},indent=2))
         print(f'{model}: {marker or "RUN_PASS"}', flush=True)
         return console
 

@@ -172,6 +172,11 @@ global {
             ask station { do ranr_capture(time/60.0); ranr_local_rate <- ranr_prior_rate; }
             map<string,unknown> prior <- ranr_record(["sid"::sid,"issued"::0.0,"powers"::copy(station.ranr_local_snapshot["powers"]),"release_lo"::zero_vector(station.installed_port_count),"release_hi"::zero_vector(station.installed_port_count),"queue"::[],"source"::"prior","operational"::true,"connectors"::["generic-public"]]);
             prior["source"] <- "prior"; prior["issued"] <- 0.0;
+            prior["busy"] <- [];
+            // Installed aggregate capacity is public metadata, independent of live peers/outages.
+            map<string,unknown> public_limits <- ranr_environment["station_aggregate_power_kw"];
+            prior["powers"] <- list<float>(station.ranr_port_catalog.values);
+            prior["aggregate_kw"] <- station.ranr_station_limit_kw>=0.0 ? station.ranr_station_limit_kw : (public_limits contains_key station.name ? float(public_limits[station.name]) : sum(list<float>(prior["powers"])));
             ranr_public_priors << prior;
         }
         save (ranr_stations collect ["sid"::each.ranr_sid,"name"::each.name,"ports"::copy(each.ranr_port_catalog)]) to:ranr_output+"/station_inventory.json" format:"json";
@@ -192,6 +197,7 @@ global {
             assert file_exists(ranr_calibration_file);
             map<string,unknown> calibration <- json_file(ranr_calibration_file).contents;
             assert string(calibration["objective_version"])=ranr_objective_version and string(calibration["objective_config_hash"])=ranr_objective_config_hash;
+            assert string(calibration["observation_version"])=ranr_observation_version;
             assert string(calibration["backend"])="GAMA" and string(calibration["split"])="train" and string(calibration["environment_version"])=ranr_environment_version;
             ranr_release_fractions <- list<float>(calibration["release_fractions"]);
             ranr_energy_fractions <- list<float>(calibration["energy_fractions"]);

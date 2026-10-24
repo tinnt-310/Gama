@@ -1,6 +1,6 @@
 # Hồ sơ thay đổi khoa học RANR-AW
 
-Phiên bản môi trường `persistent-soc-activity-6`; observation `station-observation-4`, packet `peer-packet-3`, objective `intent-service-5`, model `gama-ranr-v4`, calibration `gama-calibration-v4`. Đây là thay đổi tại chỗ; checkpoint `5800181` bảo toàn công thức và triển khai trước.
+Phiên bản môi trường `persistent-soc-activity-6`; observation `station-observation-5`, packet `peer-packet-3`, objective `intent-service-5`, model `gama-ranr-v4`, calibration `gama-calibration-v4`. Đây là thay đổi tại chỗ; checkpoint `5800181` bảo toàn công thức và triển khai trước.
 
 | Thành phần | Trước / vấn đề | Quyết định hiện hành / giả định | Bằng chứng cần đọc |
 |---|---|---|---|

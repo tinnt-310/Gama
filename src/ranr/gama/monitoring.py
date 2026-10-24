@@ -7,8 +7,16 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import threading
 
 from ..paths import write_json
+
+TRAINING_CANCEL = threading.Event()
+
+
+def check_training_cancelled():
+    if TRAINING_CANCEL.is_set():
+        raise InterruptedError('Training termination requested; pending generation retained')
 
 
 MEMORY_WARNING = (
@@ -94,7 +102,16 @@ def diagnose(folder: Path, pgid: int, reason: str) -> Path:
 def wait_for_gama(process, log: Path, timeout: float, environment: dict) -> int:
     stall_seconds = float(environment.get("RANR_STALL_SECONDS", "0"))
     if log.name != "launch.log" or stall_seconds <= 0:
-        return process.wait(timeout=timeout)
+        started = time.monotonic()
+        while True:
+            check_training_cancelled()
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            try:
+                return process.wait(timeout=min(1.0, remaining))
+            except subprocess.TimeoutExpired:
+                pass
     from .headless import last_simulation_minute
 
     startup = float(environment.get("RANR_STARTUP_SECONDS", "900"))
@@ -105,6 +122,7 @@ def wait_for_gama(process, log: Path, timeout: float, environment: dict) -> int:
     started = last_change = time.monotonic()
     last = None
     while True:
+        check_training_cancelled()
         now = time.monotonic()
         progress = last_simulation_minute(folder)
         if progress is not None and (last is None or progress > last):

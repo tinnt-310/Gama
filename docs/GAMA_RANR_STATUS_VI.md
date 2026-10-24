@@ -1,6 +1,6 @@
 # Trạng thái RANR-AW — 17/10/2026
 
-Môi trường `persistent-soc-activity-6`, objective `intent-service-5`, observation `station-observation-4`. Mỗi episode chuẩn 4320 phút: 6h warmup + 60h measurement + 6h drain, bước 60s. Training tối đa 72 giờ máy riêng, cộng dồn qua resume.
+Môi trường `persistent-soc-activity-6`, objective `intent-service-5`, observation `station-observation-5`. Mỗi episode chuẩn 4320 phút: 6h warmup + 60h measurement + 6h drain, bước 60s. Training tối đa 72 giờ máy riêng, cộng dồn qua resume.
 
 Ba Collect 800001/800002/800003 hoàn tất trên phiên bản trước sửa pipeline được giữ nguyên. Chọn seed theo manifest, không dùng directory mtime. Dữ liệu cũ chỉ được nhận qua kiểm tra tương thích và replay; không sửa provenance trong manifest. Khác biệt một lượt 800001 lịch sử vẫn cần truy nguyên. Nếu không chứng minh được tương thích, pipeline thu mới trên nguồn đóng băng.
 

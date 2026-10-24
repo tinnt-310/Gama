@@ -40,6 +40,28 @@ def read_evidence(path):
     return record
 
 
+PRE_TRAINING_GATES = frozenset({
+    'scientific_formulation', 'model_native', 'gui_headless', 'configuration',
+    'data_complete', 'calibration', 'predictive_validity', 'accuracy_mc',
+    'development', 'design_freeze', 'performance_budget', 'optimizer_smoke',
+    'checkpoint_resume',
+})
+
+
+def verify_training_acceptance(path):
+    """User acceptance contract: each prerequisite needs current hash-linked evidence."""
+    proof = read_evidence(path)
+    if proof.get('kind') != 'pre_training_acceptance' or set(proof.get('gates', {})) != PRE_TRAINING_GATES:
+        raise ValueError('Complete pre-training gate evidence required; training NOT READY')
+    for gate, item in proof['gates'].items():
+        record = read_evidence(verify_reference(item))
+        if gate == 'model_native':
+            verify_native(item['path'])
+        elif record.get('kind') != gate:
+            raise ValueError('Wrong pre-training evidence kind: ' + gate)
+    return proof
+
+
 def validate_collection(folder, compatibility=None):
     folder = Path(folder).resolve()
     manifest = json.loads((folder / "manifest.json").read_text())
@@ -197,7 +219,7 @@ def verify_native(path):
             raise ValueError(f"Invalid native fixture evidence: {item['path']}; marker={marker!r}; failures={failures}")
         markers.add(marker)
     required = {"RANR_OBJECTIVE_PASS", "RANR_PHYSICAL_PASS", "RANR_DECISION_PASS", "RANR_PROTOCOL_PASS",
-                "RANR_PORT_CAPACITY_PASS", "RANR_LAST_DAY_PASS"}
+                "RANR_PORT_CAPACITY_PASS", "RANR_LAST_DAY_PASS", "RANR_BUSY_STATE_PASS"}
     if not required <= markers:
         raise ValueError("Native validation lacks required fixture coverage")
     return record
