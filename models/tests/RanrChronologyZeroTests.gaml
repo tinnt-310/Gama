@@ -13,6 +13,8 @@ global {
     init {
         ranr_done <- true;
         create charging_station with:[location::{0,0},port_60::1,ranr_station_limit_kw::60.0];
+        if fixture_mode="tiny_unpowered" { charging_station[0].ranr_station_limit_kw <- 0.0; }
+        if fixture_mode="tiny_partial" { charging_station[0].ranr_station_limit_kw <- 1e-11; }
         ranr_stations <- list(charging_station);
         if fixture_mode="clock_guard" {
             ask charging_station[0] { do ranr_advance_service(1.0); do ranr_advance_service(0.5); }
@@ -31,21 +33,31 @@ global {
         } else {
             fixture_energies <- fixture_mode="zero_middle" ? [1.0,0.0,1.0] :
                 (fixture_mode="all_zero" ? [0.0,0.0] :
-                 (fixture_mode="tiny_front" ? [1e-12,1.0] :
-                  (fixture_mode="tiny_last" ? [1.0,1e-12] : [0.0,1.0])));
+                 (fixture_mode in ["tiny_front","tiny_partial","tiny_unpowered"] ? [1e-12,1.0] :
+                  (fixture_mode="tiny_last" ? [1.0,1e-12] :
+                   (fixture_mode="tiny_middle" ? [1.0,1e-12,1.0] :
+                    (fixture_mode="tiny_chain" ? [1e-12,1e-12,1.0] : [0.0,1.0])))));
             list<map<string,unknown>> jobs <- [];
             loop i from:0 to:length(fixture_energies)-1 {
                 map<string,unknown> job <- ranr_record(["at"::0.0,"energy"::fixture_energies[i],"max_kw"::60.0,"soc"::30.0]);
+                if fixture_mode="tiny_unpowered" and i=1 { job["at"] <- 1.0; }
                 if fixture_mode="zero_busy" and i=0 { job["port"] <- 0; }
                 jobs << job;
             }
-            expected_schedule <- ranr_service_schedule([60.0],jobs,60.0,10.0);
-            assert bool(expected_schedule["cleared"]);
-            assert empty(list<float>(expected_schedule["starts"]) where (each<0.0));
-            loop i from:0 to:length(fixture_energies)-1 {
-                float expected <- fixture_energies[i];
-                assert abs(list<float>(expected_schedule["delivered"])[i]-expected)<=max(1e-18,abs(expected)*1e-12);
-                assert list<float>(expected_schedule["finishes"])[i]>=list<float>(expected_schedule["starts"])[i];
+            expected_schedule <- ranr_service_schedule([60.0],jobs,charging_station[0].ranr_station_limit_kw,fixture_mode="tiny_partial" ? 5.0 : 10.0);
+            if fixture_mode in ["tiny_unpowered","tiny_partial"] {
+                assert !bool(expected_schedule["cleared"]);
+                assert list<float>(expected_schedule["starts"])[1]<0.0;
+                assert empty(list<float>(expected_schedule["finishes"]) where (each>=0.0));
+                assert list<float>(expected_schedule["delivered"])[0]<fixture_energies[0];
+            } else {
+                assert bool(expected_schedule["cleared"]);
+                assert empty(list<float>(expected_schedule["starts"]) where (each<0.0));
+                loop i from:0 to:length(fixture_energies)-1 {
+                    float expected <- fixture_energies[i];
+                    assert abs(list<float>(expected_schedule["delivered"])[i]-expected)<=max(1e-18,abs(expected)*1e-12);
+                    assert list<float>(expected_schedule["finishes"])[i]>=list<float>(expected_schedule["starts"])[i];
+                }
             }
         }
         loop i from:0 to:length(fixture_energies)-1 {
@@ -79,6 +91,16 @@ global {
                 float before <- chronology_zero_ev[0].delivered_energy;
                 do ranr_apply_outages(at);
                 assert chronology_zero_ev[0].delivered_energy=before;
+            } else if fixture_mode in ["tiny_unpowered","tiny_partial"] {
+                assert length(charging_station[0].charging_vehicles)=1 and length(charging_station[0].waiting_queue)=1;
+                assert length(charging_station[0].physical_sessions)=2;
+                assert chronology_zero_ev[0].session_state="charging" and chronology_zero_ev[1].session_state="waiting";
+                assert chronology_zero_ev[0].service_finish<0.0 and !chronology_zero_ev[0].completion_pending;
+                float expected <- fixture_mode="tiny_unpowered" ? 0.0 : 7.5e-13;
+                assert abs(chronology_zero_ev[0].delivered_energy-expected)<1e-18;
+                assert chronology_zero_ev[1].delivered_energy=0.0;
+                assert abs(charging_station[0].power_consumed-expected/charge_efficiency)<1e-18;
+                assert abs(chronology_zero_ev[0].battery_level-(30.0+100.0*expected/battery_capacity_kwh))<1e-9;
             } else {
                 assert empty(charging_station[0].charging_vehicles);
                 assert empty(charging_station[0].waiting_queue);

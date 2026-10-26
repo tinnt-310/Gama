@@ -425,7 +425,10 @@ global {
                 float energy <- min(remaining[j],eta*rates[port_id]*service_interval_min/60.0);
                 remaining[j] <- remaining[j]-energy; received[j] <- received[j]+energy;
                 jobs[j]["soc"] <- float(jobs[j]["soc"])+100.0*energy/capacity;
-                if remaining[j]<=1e-9 {
+                // Preserve the existing absolute tolerance for ordinary jobs.
+                // A demand below that tolerance must actually receive all of
+                // its energy; zero/partial power cannot complete it for free.
+                if remaining[j]=0.0 or (float(jobs[j]["energy"])>1e-9 and remaining[j]<=1e-9) {
                     finishes[j] <- clock+service_interval_min; owner[port_id] <- -1;
                     free_after[port_id] <- tick*ceil((clock+service_interval_min)/tick-1e-10);
                     // Any positive service occupies its port through the next
@@ -438,15 +441,16 @@ global {
             clock <- clock+service_interval_min;
             if empty(remaining where (each>1e-9)) and empty(finishes where (each<0.0)) { break; }
         }
-        list<float> waits <- []; list<float> services <- [];
+        list<float> waits <- []; list<float> services <- []; bool cleared <- true;
         loop j from:0 to:count-1 {
             if count=0 { break; }
+            if finishes[j]<0.0 or remaining[j]>1e-9 or (float(jobs[j]["energy"])<=1e-9 and remaining[j]>0.0) { cleared <- false; }
             waits << (starts[j]>=0.0 ? max(0.0,starts[j]-float(jobs[j]["at"])) : max(0.0,(finishes[j]>=0.0 ? finishes[j] : min(until_min,clock))-float(jobs[j]["at"])));
             services << (finishes[j]>=0.0 ? max(0.0,finishes[j]-starts[j]) : (starts[j]>=0.0 ? max(0.0,clock-starts[j]) : 0.0));
         }
         ranr_queue_calls <- ranr_queue_calls+1;
         return ranr_record(["starts"::starts,"finishes"::finishes,"delivered"::received,"remaining"::remaining,"services"::services,"waits"::waits,"nominal_services"::services,
-            "total"::sum(waits),"cleared"::(empty(remaining where (each>1e-9)) and empty(finishes where (each<0.0))),"duration"::clock,"iterations"::iterations]);
+            "total"::sum(waits),"cleared"::cleared,"duration"::clock,"iterations"::iterations]);
     }
     map<string,unknown> ranr_shadow_observed(map<string,unknown> snapshot,list<float> releases,list<map<string,unknown>> jobs,float aggregate_kw) {
         // Legacy release-only fixtures retain their explicit approximation. Native
