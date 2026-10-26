@@ -355,20 +355,25 @@ global {
         float tick <- step/60.0; float eta <- charge_efficiency;
         float capacity <- float(ranr_environment["battery_capacity_kwh"]);
         list<map<string,unknown>> jobs <- []; list<int> owner <- powers collect -1;
+        list<bool> observed_busy_ports <- powers collect false;
         list<float> free_after <- powers collect 0.0;
         list<float> starts <- []; list<float> finishes <- []; list<float> received <- []; list<float> remaining <- [];
         loop source_job over:source_jobs {
             map<string,unknown> job <- ranr_record(source_job);
             job["soc"] <- "soc" in job.keys ? float(job["soc"]) : 0.0;
             job["at"] <- max(0.0,tick*ceil(float(job["at"])/tick-1e-10));
+            assert float(job["energy"])>=0.0;
             jobs << job; starts << -1.0; finishes << -1.0; received << 0.0; remaining << float(job["energy"]);
         }
         int count <- length(jobs); float clock <- 0.0; int iterations <- 0;
         loop j from:0 to:count-1 {
             if count=0 { break; }
             if "port" in jobs[j].keys {
-                int port_id <- int(jobs[j]["port"]); assert owner[port_id]=-1;
-                owner[port_id] <- j; starts[j] <- 0.0;
+                int port_id <- int(jobs[j]["port"]); assert !observed_busy_ports[port_id];
+                observed_busy_ports[port_id] <- true;
+                starts[j] <- 0.0;
+                if remaining[j]=0.0 { finishes[j] <- 0.0; }
+                else { owner[port_id] <- j; }
             }
         }
         loop while: count>0 and clock<until_min-1e-10 and iterations<100000 {
@@ -389,7 +394,11 @@ global {
                     if owner[port_id]<0 and free_after[port_id]<=clock+1e-9 and powers[port_id]>0.0 and (selected<0 or powers[port_id]>powers[max(0,selected)]) { selected <- port_id; }
                 }
                 if selected<0 { break; }
-                starts[j] <- clock; owner[selected] <- j;
+                starts[j] <- clock;
+                // A zero-energy FIFO head completes at dispatch without holding
+                // the available port or delaying the next customer by a tick.
+                if remaining[j]=0.0 { finishes[j] <- clock; }
+                else { owner[selected] <- j; }
             }
             list<float> limits <- [];
             loop port_id from:0 to:length(powers)-1 { int j <- owner[port_id]; limits << (j<0 ? 0.0 : ranr_acceptance(float(jobs[j]["max_kw"]),float(jobs[j]["soc"]))); }
@@ -409,7 +418,7 @@ global {
                     loop boundary over:ranr_taper_soc where (each>float(jobs[j]["soc"])+1e-7) { service_interval_min <- min(service_interval_min,60.0*(boundary-float(jobs[j]["soc"]))*capacity/(100.0*eta*rate)); }
                 }
             }
-            if !future or service_interval_min<=1e-10 { break; }
+            if !future or service_interval_min<=0.0 { break; }
             loop port_id from:0 to:length(powers)-1 {
                 int j <- owner[port_id];
                 if j<0 { continue; }
@@ -419,10 +428,15 @@ global {
                 if remaining[j]<=1e-9 {
                     finishes[j] <- clock+service_interval_min; owner[port_id] <- -1;
                     free_after[port_id] <- tick*ceil((clock+service_interval_min)/tick-1e-10);
+                    // Any positive service occupies its port through the next
+                    // physical dispatch tick, even below the time epsilon.
+                    if free_after[port_id]<=clock {
+                        free_after[port_id] <- tick*(floor(clock/tick)+1.0);
+                    }
                 }
             }
             clock <- clock+service_interval_min;
-            if empty(remaining where (each>1e-9)) { break; }
+            if empty(remaining where (each>1e-9)) and empty(finishes where (each<0.0)) { break; }
         }
         list<float> waits <- []; list<float> services <- [];
         loop j from:0 to:count-1 {
@@ -432,7 +446,7 @@ global {
         }
         ranr_queue_calls <- ranr_queue_calls+1;
         return ranr_record(["starts"::starts,"finishes"::finishes,"delivered"::received,"remaining"::remaining,"services"::services,"waits"::waits,"nominal_services"::services,
-            "total"::sum(waits),"cleared"::empty(remaining where (each>1e-9)),"duration"::clock,"iterations"::iterations]);
+            "total"::sum(waits),"cleared"::(empty(remaining where (each>1e-9)) and empty(finishes where (each<0.0))),"duration"::clock,"iterations"::iterations]);
     }
     map<string,unknown> ranr_shadow_observed(map<string,unknown> snapshot,list<float> releases,list<map<string,unknown>> jobs,float aggregate_kw) {
         // Legacy release-only fixtures retain their explicit approximation. Native

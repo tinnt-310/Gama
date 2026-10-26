@@ -171,6 +171,12 @@ species charging_station parent:ranr_station_agent {
     action process_queue {
         if waiting_queue=nil { write "NIL_QUEUE "+self+" "+species(self); assert false; }
         do reconcile_sessions;
+        // Exact zero remaining demand must not retain physical port ownership.
+        loop ev over:copy(charging_vehicles) where (each.requested_energy=each.delivered_energy) {
+            ev.service_finish <- max(ev.service_start,ranr_service_clock);
+            ev.completion_pending <- true;
+            ask ev { do stop_charging; }
+        }
         waiting_queue <- waiting_queue where (!dead(each) and each.session_state = "waiting");
         loop while: !empty(waiting_queue) and find_available_port() > 0 {
             elecar ev <- waiting_queue[0];
@@ -192,6 +198,11 @@ species charging_station parent:ranr_station_agent {
             total_waiting_time <- total_waiting_time + ev.waiting_time;
             physical_sessions[ev.request_id] <- world.session_snapshot(ev);
             ask world { do record_event(ev, "service_started"); }
+            if ev.requested_energy=ev.delivered_energy {
+                ev.service_finish <- ev.service_start;
+                ev.completion_pending <- true;
+                ask ev { do stop_charging; }
+            }
         }
     }
     action cancel_session(elecar ev) {
@@ -268,6 +279,7 @@ species charging_station parent:ranr_station_agent {
         ranr_peak_pressure <- max(ranr_peak_pressure,ranr_pressure);
     }
     action ranr_advance_service(float at) {
+        if at<ranr_service_clock { write "RANR_STATION_SERVICE_CLOCK_REVERSED"; assert false; }
         do reconcile_sessions;
         float elapsed <- max(0.0,at-ranr_service_clock);
         list<elecar> owners <- copy(charging_vehicles);

@@ -89,12 +89,18 @@ class RunConfig:
         if self.station_events:
             events=json.loads(Path(self.station_events).read_text())
             if not isinstance(events,list):raise ValueError("Station events must be a list")
+            previous_event_at = -1.0
             for event in events:
                 if (not finite_tree(event) or not isinstance(event.get("operational"),bool)
                     or type(event.get("sid")) is not int or not 0<=event["sid"]<11
                     or event.get("at",-1)<0 or not 0<=event.get("factor",-1)<=1
                     or any(type(x)is not int or x<0 for x in event.get("failed_ports",[]))):
                     raise ValueError("Invalid station event")
+                # File order is the deterministic tie-break for equal timestamps.
+                # Do not silently rewrite the registered input file or its hash.
+                if event['at'] < previous_event_at:
+                    raise ValueError('Station events must be ordered by time; equal timestamps retain file order')
+                previous_event_at = event['at']
         if self.method not in METHODS or self.case not in CASES:
             raise ValueError("Unknown GAMA method/scenario")
         if self.environment_version != ENVIRONMENT_VERSION:

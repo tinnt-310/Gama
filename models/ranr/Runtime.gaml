@@ -76,9 +76,17 @@ global {
         map<string,unknown> events_document <- json_file(ranr_station_events_file).contents;
         assert "gama_contents" in events_document.keys and events_document["gama_contents"] is list;
         ranr_outage_schedule <- list<map<string,unknown>>(events_document["gama_contents"]);
+        // GUI loading also accepts historical unsorted files. Sort timestamps,
+        // then retain original file order inside each timestamp explicitly.
+        list<float> event_times <- remove_duplicates(ranr_outage_schedule collect float(each["at"])) sort_by each;
+        list<map<string,unknown>> ordered_events <- [];
+        loop event_at over:event_times {
+            ordered_events <- ordered_events+(ranr_outage_schedule where (float(each["at"])=event_at));
+        }
+        ranr_outage_schedule <- ordered_events;
         loop outage over:ranr_outage_schedule {
             outage["applied"] <- false;
-            assert int(outage["sid"])>=0 and int(outage["sid"])<11 and float(outage["factor"])>=0.0 and float(outage["factor"])<=1.0;
+            assert int(outage["sid"])>=0 and int(outage["sid"])<11 and float(outage["at"])>=0.0 and float(outage["factor"])>=0.0 and float(outage["factor"])<=1.0;
         }
     }
     action ranr_apply_outages(float at) {
