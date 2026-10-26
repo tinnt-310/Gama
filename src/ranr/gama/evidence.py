@@ -70,7 +70,12 @@ def validate_collection(folder, compatibility=None):
         if compatibility is None:
             raise ValueError(f"Historical calibration needs verified compatibility: {folder}")
         proof = read_evidence(compatibility)
-        if proof.get("kind") == "headless_calibration_transition":
+        if proof.get('kind') == 'physics_calibration_import':
+            from .calibration_import import verify_calibration_import
+            verified = verify_calibration_import(compatibility)
+            if verified['runs'].get(str(folder)) != digest(folder / 'manifest.json'):
+                raise ValueError('Collection not covered by scoped physics calibration import')
+        elif proof.get("kind") == "headless_calibration_transition":
             from .transition import verify_transition
             verify_transition(compatibility)
             if proof.get("runs", {}).get(str(folder)) != digest(folder / "manifest.json"):
@@ -197,6 +202,9 @@ def verify_native(path):
     from .monitoring import classify_console
     for item in record["dependencies"]:
         fixture = read_reference(item)
+        if 'src/ranr/gama/execution.py' in execution_source.get('orchestrator',{}):
+            from .execution import verify_recorded_python
+            verify_recorded_python(fixture.get('python_execution',{}),execution_source)
         marker = fixture.get("marker")
         console = fixture.get("console", "")
         failures = classify_console(console)[0]

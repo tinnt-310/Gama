@@ -70,9 +70,12 @@ class RunConfig:
     objective_config_hash: str = OBJECTIVE_CONFIG_HASH
     station_events: str = ""
     calibration: str = ""
+    calibration_import_certificate: str = ""
     timeout_seconds: float = 21600
 
     def __post_init__(self):
+        if self.calibration_import_certificate and not self.calibration:
+            raise ValueError('A calibration import certificate requires its original calibration')
         if self.objective_config_hash != OBJECTIVE_CONFIG_HASH or ENVIRONMENT["objective_config_hash"] != OBJECTIVE_CONFIG_HASH:
             raise ValueError("Objective configuration hash mismatch")
         if self.objective_version != OBJECTIVE_VERSION or self.observation_version != OBSERVATION_VERSION:
@@ -169,17 +172,24 @@ class RunConfig:
                 data["calibration"] = str(candidate)
             elif canonical.exists():
                 data["calibration"] = str(canonical)
-        if data.get("calibration"):
-            calibration = json.loads(Path(data["calibration"]).read_text())
-            validate_objective_identity(calibration)
-            if (
-                calibration.get("environment_version") != ENVIRONMENT_VERSION
-                or calibration.get("source") != provenance()
-            ):
-                raise ValueError(
-                    "Calibration environment/source changed; recollect calibration"
-                )
-        return cls(**data)
+        config = cls(**data)
+        validate_calibration_binding(config)
+        return config
+
+
+def validate_calibration_binding(config):
+    """Keep historical calibration bytes/source; require an explicit scoped import."""
+    if not config.calibration:
+        return
+    calibration = json.loads(Path(config.calibration).read_text())
+    validate_objective_identity(calibration)
+    if calibration.get('environment_version') != ENVIRONMENT_VERSION:
+        raise ValueError('Calibration environment changed')
+    if config.calibration_import_certificate:
+        from .calibration_import import verify_calibration_import
+        verify_calibration_import(Path(config.calibration_import_certificate), Path(config.calibration))
+    elif calibration.get('source') != provenance():
+        raise ValueError('Calibration source changed; verified scoped import certificate required')
 
 
 def provenance() -> dict[str, Any]:
@@ -407,6 +417,12 @@ def run(
     resume: bool = False,
     wall_limit: float | None = None,
 ) -> dict:
+    started = time.perf_counter()
+    from .execution import assert_checkout_modules
+    actual_python = assert_checkout_modules()
+    validate_calibration_binding(config)
+    if wall_limit is not None and time.perf_counter()-started >= wall_limit:
+        raise TimeoutError('Native allowance expired during execution/calibration preflight')
     folder = folder.resolve()
     record = parameter_record(config.method, parameters)
     config_record = asdict(config)
@@ -416,6 +432,8 @@ def run(
         "config": config_record,
         "parameters": record,
         "source": provenance(),
+        "calibration_import_sha256": (digest(Path(config.calibration_import_certificate))
+            if config.calibration_import_certificate else None),
         "station_events_sha256": digest(Path(config.station_events)) if config.station_events else None,
         "calibration_sha256": (
             digest(Path(config.calibration)) if config.calibration else None
@@ -451,6 +469,7 @@ def run(
     folder.mkdir(parents=True)
     manifest = {
         **inputs,
+        "python_execution": actual_python,
         "run_id": run_id,
         "backend": "GAMA",
         "status": "running",
@@ -462,7 +481,6 @@ def run(
         shutil.copy2(config.calibration, folder / "calibration.json")
     if config.station_events:
         shutil.copy2(config.station_events,folder/"station_events.json")
-    started = time.perf_counter()
     env = os.environ.copy()
     env.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
     try:

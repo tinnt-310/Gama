@@ -15,6 +15,8 @@ from ranr.paths import ROOT
 
 def check_models():
     """Compile every GAML root in one JVM; CheckModel reports each root independently."""
+    from .execution import assert_checkout_modules
+    assert_checkout_modules()
     models = sorted((ROOT / "models").rglob("*.gaml"))
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/gama.py"), "-check", *map(str, models)],
@@ -30,6 +32,8 @@ def check_models():
 
 
 def run_model(model, experiment, steps, marker=None, parameters=None, seed=42, resource_output=None):
+    from .execution import assert_checkout_modules
+    actual_python = assert_checkout_modules()
     with tempfile.TemporaryDirectory(prefix="evstation-test-") as tmp:
         base = Path(tmp)
         xml = base / "plan.xml"
@@ -93,7 +97,7 @@ def run_model(model, experiment, steps, marker=None, parameters=None, seed=42, r
         if resource_output:
             resource_output = Path(resource_output)
             resource_output.parent.mkdir(parents=True,exist_ok=True)
-            resource_output.write_text(json.dumps({"model":model,"experiment":experiment,"steps":steps,"marker":marker,"parameters":parameters,"seed":seed,"resources":resources},indent=2))
+            resource_output.write_text(json.dumps({"model":model,"experiment":experiment,"steps":steps,"marker":marker,"parameters":parameters,"seed":seed,"resources":resources,"python_execution":actual_python},indent=2))
         print(f'{model}: {marker or "RUN_PASS"}', flush=True)
         return console
 

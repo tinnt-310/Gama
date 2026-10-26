@@ -22,6 +22,8 @@ from .pipeline import jobs, collect_calibration, report, benchmark_budget
 
 
 def main() -> None:
+    from .execution import assert_checkout_modules
+    assert_checkout_modules()
     p = argparse.ArgumentParser(description="RANR GAMA-native research")
     p.add_argument("--config", type=Path, default=ROOT / "configs/gama/research.json")
     sub = p.add_subparsers(dest="command", required=True)

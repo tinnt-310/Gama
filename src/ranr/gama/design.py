@@ -145,11 +145,14 @@ def freeze_design(folder, decision):
     verify_development(development_path,RunConfig(**registration["base_config"]))
     calibration = Path(registration["base_config"]["calibration"])
     cal = json.loads(calibration.read_text())
-    if cal.get("source")!=provenance() or cal.get("split")!="train" or cal.get("objective_config_hash")!=OBJECTIVE_CONFIG_HASH:
+    from .headless import validate_calibration_binding
+    validate_calibration_binding(RunConfig(**registration['base_config']))
+    if cal.get("split")!="train" or cal.get("objective_config_hash")!=OBJECTIVE_CONFIG_HASH:
         raise ValueError("Current train calibration required")
     from .evidence import validate_collection
-    compatibility = Path(cal["compatibility"]["path"]) if cal.get("compatibility") else None
-    if compatibility and digest(compatibility)!=cal["compatibility"]["sha256"]: raise ValueError("Compatibility changed")
+    imported = registration['base_config'].get('calibration_import_certificate')
+    compatibility = Path(imported) if imported else (Path(cal["compatibility"]["path"]) if cal.get("compatibility") else None)
+    if compatibility and not imported and digest(compatibility)!=cal["compatibility"]["sha256"]: raise ValueError("Compatibility changed")
     if len(cal["runs"])!=3: raise ValueError("Three calibration seeds required")
     seeds = set()
     for path,sha in cal["runs"].items():
@@ -159,6 +162,8 @@ def freeze_design(folder, decision):
         seeds.add(json.loads((run_folder/"manifest.json").read_text())["config"]["seed"])
     if seeds!={800001,800002,800003}: raise ValueError("Calibration seed protocol changed")
     dependencies = [reference(p) for p in (folder/"review.json",folder/"registration.json",decision,native_path,development_path,calibration)]
+    if imported:
+        dependencies.append(reference(Path(imported)))
     for name in rows:
         dependencies.append(reference(folder/name/"results.json"))
         for case in CASES:
@@ -170,13 +175,18 @@ def freeze_design(folder, decision):
         "calibration_passed":True,"information_passed":True,"exposure_passed":True,
         "objective_sensitivity_passed":True,"design_validation_passed":True,
         "review_sha256":digest(folder/"review.json"),"design_folder":str(folder.resolve()),
-        "calibration_sha256":digest(calibration),"dependencies":dependencies}
+        "calibration_sha256":digest(calibration),
+        "calibration_import_sha256":digest(Path(imported)) if imported else None,"dependencies":dependencies}
     write_json(OUTPUT/"design_freeze.json",record)
     return record
 
 
 def validate_freeze(path, config):
     record = read_evidence(path)
+    from .headless import validate_calibration_binding
+    validate_calibration_binding(config)
+    if record.get('calibration_import_sha256') != (digest(Path(config.calibration_import_certificate)) if config.calibration_import_certificate else None):
+        raise ValueError('Design freeze calibration import changed')
     if record.get("objective_config_hash")!=OBJECTIVE_CONFIG_HASH or record.get("calibration_sha256")!=digest(Path(config.calibration)):
         raise ValueError("Design freeze calibration/objective changed")
     if any(getattr(config,k)!=v for k,v in record["selected_config"].items()):

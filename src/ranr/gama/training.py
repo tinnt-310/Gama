@@ -51,6 +51,8 @@ def _evaluate(config,method,theta,folder,seed,workers,remaining=None):
 
 
 def train(config:RunConfig,folder:Path,budget_file:Path,*,resume=False,smoke=False,workers_override=None):
+    from .execution import assert_checkout_modules
+    assert_checkout_modules()
     specification=json.loads(budget_file.read_text())
     if smoke and not config.development: raise ValueError('Optimizer smoke requires development configuration')
     if not smoke:

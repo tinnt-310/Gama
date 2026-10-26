@@ -142,6 +142,12 @@ def physical_accuracy(config, folder):
         raise ValueError("Registered 60-second physical step failed or probe lacks observations")
 
 
+def concurrency_config(locked, index):
+    """Same complete calibrated workload, with all methods and scenarios covered."""
+    return replace(locked, step_seconds=60, seed=900301+index//len(METHODS),
+        method=METHODS[index%len(METHODS)], case=CASES[(index//len(METHODS))%len(CASES)])
+
+
 def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours: float, stage="all"):
     from .evidence import read_evidence, reference
     if stage not in {"all","accuracy","performance"}: raise ValueError("Unknown benchmark stage")
@@ -186,7 +192,6 @@ def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours:
         locked = config
     from .design import validate_freeze
     validate_freeze(ROOT / "outputs/gama_ranr/design_freeze.json", locked)
-    probe = replace(locked,development=True,warmup_minutes=10,measure_minutes=180,trace=False)
     candidate = {}
     long = {}
     performance = []
@@ -232,7 +237,8 @@ def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours:
     )
     peak = max(r["max_rss_kib"] for r in performance)
     concurrency = []
-    batch_size = max(8, max(worker_options))
+    grid_size = len(METHODS)*len(CASES)
+    batch_size = grid_size*math.ceil(max(grid_size,max(worker_options))/grid_size)
     for workers in sorted(set([1, *worker_options])):
         if workers < 1 or workers * peak > available_kib * 0.7:
             continue
@@ -246,12 +252,7 @@ def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours:
         start = time.perf_counter()
 
         def work(i):
-            c = replace(
-                probe,
-                step_seconds=60,
-                seed=900301 + i,
-                method=METHODS[i % 4],
-            )
+            c = concurrency_config(locked,i)
             return run(
                 c, [0.0] * (4 if c.method == "Fixed-Weights" else 20), attempt / str(i)
             )
@@ -266,6 +267,9 @@ def benchmark(config: RunConfig, folder: Path, worker_options: list[int], hours:
             "throughput": batch_size / elapsed,
             "max_rss_kib": workers * max(r["max_rss_kib"] for r in rows),
             "attempt": str(attempt.resolve()),
+            "profile": "complete_registered_training_workload",
+            "configs": [concurrency_config(locked,i).__dict__ for i in range(batch_size)],
+            "manifests": [reference(attempt/str(i)/'manifest.json') for i in range(batch_size)],
         }
         write_json(measurement, record)
         concurrency.append(record)
