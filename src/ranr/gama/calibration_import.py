@@ -104,6 +104,9 @@ def verify_algorithm_scope(registration):
 
 
 def verify_record(proof, calibration_path=None):
+    if proof.get('kind') == 'optimizer_recovery_calibration_import':
+        from .recovery_transition import verify_certificate
+        return verify_certificate(proof, calibration_path)
     from .headless import provenance
     from .evidence import read_reference, verify_reference, verify_native
     from .contracts import validate_objective_identity

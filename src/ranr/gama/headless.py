@@ -362,6 +362,9 @@ def _launch(
 
 def checked_result(folder: Path, expected: dict) -> dict:
     manifest = json.loads((folder / "manifest.json").read_text())
+    if manifest.get('kind') == 'scoped_native_result_review':
+        from .recovery_transition import checked_adopted_result
+        return checked_adopted_result(folder, expected, manifest)
     if manifest.get("status") != "complete" or any(
         manifest.get(k) != v for k, v in expected.items()
     ):

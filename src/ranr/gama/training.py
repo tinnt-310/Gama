@@ -97,8 +97,20 @@ def train(config:RunConfig,folder:Path,budget_file:Path,*,resume=False,smoke=Fal
         checkpoint=folder/'checkpoint.pkl'
         if checkpoint.exists():
             if not resume: raise ValueError('Existing training: use --resume')
+            if not (folder/'training_time.json').is_file():
+                raise ValueError('Missing durable training journal; reconcile before resume')
             state=pickle.loads(checkpoint.read_bytes())
             if state.get('registration')!=identity: raise ValueError('Training registration changed; incompatible checkpoint')
+            # Pickle copies bound RandomState.randn; restore the registered
+            # global generator controlled by each slot's saved rng state.
+            for slot in state['slots']:
+                optimizer=slot['optimizer']
+                for generator in (optimizer.opts['randn'],optimizer.sm.randn):
+                    if (getattr(generator,'__name__',None)!='randn' or
+                            not isinstance(getattr(generator,'__self__',None),np.random.RandomState)):
+                        raise ValueError('Unsupported checkpoint sampler RNG; explicit migration required')
+                optimizer.opts['randn']=np.random.randn
+                optimizer.sm.randn=np.random.randn
         else:
             if resume: raise ValueError('No checkpoint to resume')
             slots=[]

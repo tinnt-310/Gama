@@ -59,6 +59,8 @@ def verify_training_acceptance(path):
             verify_native(item['path'])
         elif record.get('kind') != gate:
             raise ValueError('Wrong pre-training evidence kind: ' + gate)
+    from .recovery_transition import verify_blocker_acceptance
+    verify_blocker_acceptance()
     return proof
 
 
@@ -70,7 +72,7 @@ def validate_collection(folder, compatibility=None):
         if compatibility is None:
             raise ValueError(f"Historical calibration needs verified compatibility: {folder}")
         proof = read_evidence(compatibility)
-        if proof.get('kind') == 'physics_calibration_import':
+        if proof.get('kind') in {'physics_calibration_import','optimizer_recovery_calibration_import'}:
             from .calibration_import import verify_calibration_import
             verified = verify_calibration_import(compatibility)
             if verified['runs'].get(str(folder)) != digest(folder / 'manifest.json'):
@@ -186,6 +188,9 @@ def certify_compatibility(folders, review, replay, target):
 
 def verify_native(path):
     record = read_evidence(path)
+    if record.get('kind') == 'scoped_recovery_native_review':
+        from .recovery_transition import verify_native_review
+        return verify_native_review(record)
     if not record.get("dependencies"):
         raise ValueError("Native validation has no fixture evidence")
     execution_source = record.get("execution_source", provenance())
