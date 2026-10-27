@@ -1,0 +1,41 @@
+{
+  "execution_source_commit": "5da9a47de3433ef49464b34d13896cf6b8a635ea",
+  "source_branch": "fix/rng-statistics-20261027",
+  "registration_sha256": "a9a4f8e6efa4693695e1428a78ae2840241adab9bf07a5d2b75435604af31c31",
+  "calibration_sha256": "c7056b7177116b4a21203f6fb401d893187c85efeb64df31a2aabc121d82d878",
+  "controller_state": {
+    "stage": "waiting_existing_workers",
+    "updated_at": 1793117772.8358383,
+    "pid": 3049795,
+    "status": "running",
+    "training_ready": false,
+    "official_training": "BLOCKED",
+    "completed": {},
+    "reason": "Original validation workers still own the pipeline; no competing simulation launched"
+  },
+  "predecessor_state": {
+    "stage": "accuracy",
+    "updated_at": 1793117773.321478,
+    "pid": 2275974,
+    "status": "running",
+    "training_ready": false,
+    "official_training": "BLOCKED",
+    "completed": {
+      "runtime_preflight": {
+        "finished_at": 1793089639.1278317,
+        "evidence": [
+          {
+            "path": "/home/tinnt/Vinuni/outputs/gama_ranr/work_end_to_end/heap8_revalidation_20261027/runtime_preflight/acceptance.json",
+            "sha256": "91f0a71be04975a6325e6dee23fb45d4abda6c62af78bfaac414633788e0831c"
+          }
+        ]
+      }
+    },
+    "reason": "Native computation; wall time is not percentage scientific progress",
+    "active_child_pid": 2292657,
+    "active_stage_wall_seconds": 28134.065946394054
+  },
+  "official_consumed_seconds": 0,
+  "held_out_720": false,
+  "note": "Publication merges and documentation commits do not change the frozen HPC execution source."
+}

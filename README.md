@@ -1,3 +1,7 @@
+<!-- RANR_CURRENT_STATUS_START -->
+**Current RANR–GAMA source and validation progress:** [GAMA_STATUS.md](GAMA_STATUS.md). Native validation and official training statuses are reported separately.
+<!-- RANR_CURRENT_STATUS_END -->
+
 # Nha Trang GAMA RANR-AW
 
 Một mô hình GAMA: **4700 xe thường trực + nhu cầu sạc theo SOC và lịch hoạt động + inbound rush traffic + recommendation phi tập trung**. Bốn phương pháp RANR-AW, No-P2P, No-Prediction và Fixed-Weights dùng chung vật lý GAML. Python điều phối CMA-ES qua GAMA Headless và phân tích kết quả.
